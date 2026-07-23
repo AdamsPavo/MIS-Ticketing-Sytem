@@ -325,6 +325,7 @@ export default function UserManagement() {
                 <option value="user">Department User</option>
                 <option value="IT_STAFF">IT STAFF</option>
                 <option value="admin">Administrator</option>
+                <option value="QA">QA STAFF</option>
               </select>
             </div>
 

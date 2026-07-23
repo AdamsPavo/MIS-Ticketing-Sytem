@@ -10,10 +10,12 @@ import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import AllTickets from "./pages/Tickets.jsx";
 import CreateTicket from "./pages/CreateTicket.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
+import Events from "./pages/Events.jsx";
 import Login from "./pages/Login.jsx";
 import MyTickets from "./pages/MyTickets.jsx";
 import Reports from "./pages/Reports.jsx";
 import UserManagement from "./pages/UserManagement.jsx";
+import ITWorkBoard from "./pages/ITWorkBoard";
 
 function HomeRedirect() {
   return <Navigate to="/login" replace />;
@@ -22,11 +24,13 @@ function HomeRedirect() {
 export default function App() {
   return (
     <Routes>
+      {/* Public route */}
       <Route
         path="/login"
         element={<Login />}
       />
 
+      {/* Protected routes using AppLayout */}
       <Route
         element={
           <ProtectedRoute>
@@ -37,7 +41,12 @@ export default function App() {
         <Route
           path="/dashboard"
           element={
-            <ProtectedRoute allowedRoles={["admin","IT_STAFF"]}>
+            <ProtectedRoute
+              allowedRoles={[
+                "admin",
+                "IT_STAFF",
+              ]}
+            >
               <Dashboard />
             </ProtectedRoute>
           }
@@ -51,6 +60,7 @@ export default function App() {
                 "admin",
                 "IT_STAFF",
                 "user",
+                "QA",
               ]}
             >
               <CreateTicket />
@@ -65,6 +75,7 @@ export default function App() {
               allowedRoles={[
                 "admin",
                 "IT_STAFF",
+                "QA",
               ]}
             >
               <AllTickets />
@@ -80,6 +91,7 @@ export default function App() {
                 "admin",
                 "IT_STAFF",
                 "user",
+                "QA",
               ]}
             >
               <MyTickets />
@@ -90,7 +102,9 @@ export default function App() {
         <Route
           path="/reports"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute
+              allowedRoles={["admin"]}
+            >
               <Reports />
             </ProtectedRoute>
           }
@@ -99,13 +113,51 @@ export default function App() {
         <Route
           path="/settings/users"
           element={
-            <ProtectedRoute allowedRoles={["admin"]}>
+            <ProtectedRoute
+              allowedRoles={["admin"]}
+            >
               <UserManagement />
             </ProtectedRoute>
           }
         />
+
+        <Route
+          path="/events"
+          element={
+            <ProtectedRoute
+              allowedRoles={[
+                "admin",
+                "IT_STAFF",
+                "QA",
+                "user",
+              ]}
+            >
+              <Events />
+            </ProtectedRoute>
+          }
+        />
+
+          <Route
+                path="/it-work-board"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={[
+                      "admin",
+                      "IT_STAFF",
+                      "user",
+                      "QA",
+                    ]}
+                  >
+                    <ITWorkBoard />
+                  </ProtectedRoute>
+                }
+                />
+
       </Route>
 
+      
+
+      {/* Redirect routes */}
       <Route
         path="/"
         element={<HomeRedirect />}

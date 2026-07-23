@@ -16,12 +16,13 @@ import { useAuth } from "../context/AuthContext";
 
 const categoryPriority = {
   Hardware: "High",
-  Software: "Medium",
+  Software: "medium",
+  HIMS: "Medium",
+  Billing_Concerns: "High",
   Network: "Critical",
   Printer: "Low",
-  Internet: "Critical",
-  Email: "Medium",
-  Account: "Medium",
+  Item_Adjustment:"Low",
+  PHILHEALTH: "Medium",
   Other: "Low",
 };
 
@@ -81,6 +82,8 @@ export default function CreateTicket() {
 
       return;
     }
+
+    
 
     setForm((previous) => ({
       ...previous,

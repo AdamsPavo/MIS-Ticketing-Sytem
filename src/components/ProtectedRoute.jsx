@@ -1,4 +1,8 @@
-import { Navigate } from "react-router-dom";
+import {
+  Navigate,
+  Outlet,
+} from "react-router-dom";
+
 import { useAuth } from "../context/AuthContext";
 
 export default function ProtectedRoute({
@@ -25,24 +29,25 @@ export default function ProtectedRoute({
     return <Navigate to="/login" replace />;
   }
 
-  if (
-    allowedRoles?.length &&
-    !allowedRoles.includes(userProfile.role)
-  ) {
-    if (userProfile.role === "user") {
-      return <Navigate to="/create-ticket" replace />;
-    }
+  const hasAllowedRole =
+    !allowedRoles?.length ||
+    allowedRoles.includes(userProfile.role);
 
-    if (userProfile.role === "IT_STAFF") {
-      return <Navigate to="/dashboard" replace />;
-    }
+  if (!hasAllowedRole) {
+    const roleHome = {
+      admin: "/dashboard",
+      IT_STAFF: "/dashboard",
+      QA: "/events",
+      user: "/create-ticket",
+    };
 
-    if (userProfile.role === "admin") {
-      return <Navigate to="/dashboard" replace />;
-    }
-
-    return <Navigate to="/login" replace />;
+    return (
+      <Navigate
+        to={roleHome[userProfile.role] || "/login"}
+        replace
+      />
+    );
   }
 
-  return children;
+  return children || <Outlet />;
 }

@@ -1,78 +1,219 @@
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CheckCircle2,
   Clock3,
-  Plus,
-  TicketCheck,
+  Loader2,
   Tickets,
   TriangleAlert,
 } from "lucide-react";
-
+import {
+  collection,
+  onSnapshot,
+  orderBy,
+  query,
+} from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
+
+import { db } from "../firebase/firebase";
 import { useAuth } from "../context/AuthContext";
 
-const ticketStats = [
-  {
-    title: "Total Tickets",
-    value: "0",
-    description: "All submitted concerns",
-    icon: Tickets,
-    iconClass: "bg-blue-50 text-blue-600",
-  },
-  {
-    title: "New Tickets",
-    value: "0",
-    description: "Waiting for MIS review",
-    icon: TriangleAlert,
-    iconClass: "bg-orange-50 text-orange-600",
-  },
-  {
-    title: "In Progress",
-    value: "0",
-    description: "Currently being handled",
-    icon: Clock3,
-    iconClass: "bg-violet-50 text-violet-600",
-  },
-  {
-    title: "Resolved",
-    value: "0",
-    description: "Successfully completed",
-    icon: CheckCircle2,
-    iconClass: "bg-emerald-50 text-emerald-600",
-  },
-];
+const normalizeStatus = (status) =>
+  String(status || "")
+    .trim()
+    .toLowerCase();
+
+const formatDate = (value) => {
+  if (!value) return "No date";
+
+  try {
+    const date =
+      typeof value?.toDate === "function"
+        ? value.toDate()
+        : new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return "No date";
+    }
+
+    return new Intl.DateTimeFormat("en-PH", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return "No date";
+  }
+};
+
+const getStatusStyle = (status) => {
+  const normalizedStatus = normalizeStatus(status);
+
+  switch (normalizedStatus) {
+    case "pending":
+    case "new":
+      return "bg-orange-50 text-orange-700 ring-orange-600/20";
+
+    case "assigned":
+      return "bg-cyan-50 text-cyan-700 ring-cyan-600/20";
+
+    case "in progress":
+      return "bg-violet-50 text-violet-700 ring-violet-600/20";
+
+    case "resolved":
+      return "bg-emerald-50 text-emerald-700 ring-emerald-600/20";
+
+    case "closed":
+      return "bg-slate-100 text-slate-700 ring-slate-600/20";
+
+    default:
+      return "bg-blue-50 text-blue-700 ring-blue-600/20";
+  }
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
 
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    const ticketsQuery = query(
+      collection(db, "tickets"),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(
+      ticketsQuery,
+      (snapshot) => {
+        const ticketData = snapshot.docs.map((ticketDocument) => ({
+          id: ticketDocument.id,
+          ...ticketDocument.data(),
+        }));
+
+        setTickets(ticketData);
+        setLoading(false);
+        setLoadError("");
+      },
+      (error) => {
+        console.error("Unable to load dashboard tickets:", error);
+
+        setLoading(false);
+        setLoadError(
+          error.message || "Unable to load dashboard ticket information."
+        );
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const stats = useMemo(() => {
+    const countStatus = (...statuses) => {
+      const normalizedStatuses = statuses.map(normalizeStatus);
+
+      return tickets.filter((ticket) =>
+        normalizedStatuses.includes(normalizeStatus(ticket.status))
+      ).length;
+    };
+
+    return {
+      total: tickets.length,
+      pending: countStatus("Pending", "New"),
+      assigned: countStatus("Assigned"),
+      inProgress: countStatus("In Progress"),
+      resolved: countStatus("Resolved"),
+      closed: countStatus("Closed"),
+    };
+  }, [tickets]);
+
+  const ticketStats = useMemo(
+    () => [
+      {
+        title: "Total Tickets",
+        value: stats.total,
+        description: "All submitted concerns",
+        icon: Tickets,
+        iconClass: "bg-blue-50 text-blue-600",
+      },
+      {
+        title: "New Tickets",
+        value: stats.pending,
+        description: "Waiting for MIS review",
+        icon: TriangleAlert,
+        iconClass: "bg-orange-50 text-orange-600",
+      },
+      {
+        title: "In Progress",
+        value: stats.inProgress,
+        description: "Currently being handled",
+        icon: Clock3,
+        iconClass: "bg-violet-50 text-violet-600",
+      },
+      {
+        title: "Resolved",
+        value: stats.resolved,
+        description: "Successfully completed",
+        icon: CheckCircle2,
+        iconClass: "bg-emerald-50 text-emerald-600",
+      },
+    ],
+    [stats]
+  );
+
+  const recentTickets = tickets.slice(0, 5);
+
+  const openTicket = (ticket) => {
+    /*
+      Change this route if your ticket-details route is different.
+
+      Examples:
+      navigate(`/tickets/${ticket.id}`);
+      navigate(`/ticket/${ticket.id}`);
+    */
+
+    navigate("/tickets", {
+      state: {
+        selectedTicketId: ticket.id,
+      },
+    });
+  };
+
   return (
     <div className="mx-auto max-w-7xl">
-      <section className="mb-7 flex flex-col justify-between gap-5 xl:flex-row xl:items-center">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.15em] text-blue-600">
-            MIS support dashboard
-          </p>
+      {/* Page heading */}
+      <section className="mb-7">
+        <p className="text-sm font-semibold uppercase tracking-[0.15em] text-blue-600">
+          MIS support dashboard
+        </p>
 
-          <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-            Welcome back
-          </h2>
+        <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+          Welcome back
+        </h2>
 
-          <p className="mt-2 text-slate-500">
-            Signed in as {currentUser?.email}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => navigate("/tickets/create")}
-          className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700"
-        >
-          <Plus size={19} />
-          Create New Ticket
-        </button>
+        <p className="mt-2 text-slate-500">
+          Signed in as{" "}
+          <span className="font-medium text-slate-700">
+            {currentUser?.email || "MIS user"}
+          </span>
+        </p>
       </section>
 
+      {/* Error message */}
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+        >
+          {loadError}
+        </div>
+      )}
+
+      {/* Ticket statistics */}
       <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {ticketStats.map((stat) => {
           const Icon = stat.icon;
@@ -92,9 +233,18 @@ export default function Dashboard() {
                 </span>
               </div>
 
-              <p className="mt-5 text-3xl font-bold text-slate-900">
-                {stat.value}
-              </p>
+              <div className="mt-5">
+                {loading ? (
+                  <Loader2
+                    size={28}
+                    className="animate-spin text-slate-400"
+                  />
+                ) : (
+                  <p className="text-3xl font-bold text-slate-900">
+                    {stat.value}
+                  </p>
+                )}
+              </div>
 
               <h3 className="mt-1 font-semibold text-slate-800">
                 {stat.title}
@@ -109,8 +259,9 @@ export default function Dashboard() {
       </section>
 
       <section className="mt-7 grid gap-6 xl:grid-cols-[1.6fr_1fr]">
+        {/* Recent tickets */}
         <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-5">
             <div>
               <h3 className="font-bold text-slate-900">
                 Recent tickets
@@ -124,37 +275,119 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => navigate("/tickets")}
-              className="flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700"
+              className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-blue-600 transition hover:text-blue-700"
             >
               View all
               <ArrowRight size={16} />
             </button>
           </div>
 
-          <div className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center">
-            <div className="rounded-2xl bg-blue-50 p-4 text-blue-600">
-              <TicketCheck size={38} />
+          {loading ? (
+            <div className="flex min-h-72 items-center justify-center">
+              <div className="flex flex-col items-center text-slate-500">
+                <Loader2
+                  size={34}
+                  className="animate-spin text-blue-600"
+                />
+
+                <p className="mt-3 text-sm">
+                  Loading recent tickets...
+                </p>
+              </div>
             </div>
+          ) : recentTickets.length === 0 ? (
+            <div className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="rounded-2xl bg-blue-50 p-4 text-blue-600">
+                <Tickets size={38} />
+              </div>
 
-            <h4 className="mt-5 text-lg font-bold text-slate-900">
-              No tickets available
-            </h4>
+              <h4 className="mt-5 text-lg font-bold text-slate-900">
+                No tickets available
+              </h4>
 
-            <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-              New tickets submitted by departments will appear in
-              this section.
-            </p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                New tickets submitted by departments will appear in
+                this section.
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {recentTickets.map((ticket) => {
+                const title =
+                  ticket.subject ||
+                  ticket.title ||
+                  ticket.concern ||
+                  "Untitled ticket";
 
-            <button
-              type="button"
-              onClick={() => navigate("/tickets/create")}
-              className="mt-5 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Submit first ticket
-            </button>
-          </div>
+                const ticketNumber =
+                  ticket.ticketNumber ||
+                  ticket.ticket_number ||
+                  ticket.referenceNumber ||
+                  ticket.id;
+
+                return (
+                  <button
+                    key={ticket.id}
+                    type="button"
+                    onClick={() => openTicket(ticket)}
+                    className="flex w-full flex-col gap-4 px-6 py-4 text-left transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-semibold text-slate-900">
+                          {title}
+                        </p>
+
+                        <span className="text-xs font-medium text-slate-400">
+                          #{ticketNumber}
+                        </span>
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
+                        <span>
+                          {ticket.department || "No department"}
+                        </span>
+
+                        <span
+                          className="hidden text-slate-300 sm:inline"
+                          aria-hidden="true"
+                        >
+                          •
+                        </span>
+
+                        <span>
+                          {ticket.requesterName ||
+                            ticket.createdByName ||
+                            ticket.userName ||
+                            ticket.requesterEmail ||
+                            "Unknown requester"}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-xs text-slate-400">
+                        {formatDate(
+                          ticket.createdAt ||
+                            ticket.submittedAt ||
+                            ticket.dateCreated
+                        )}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`inline-flex w-fit shrink-0 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${getStatusStyle(
+                        ticket.status
+                      )}`}
+                    >
+                      {ticket.status || "Pending"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </article>
 
+        {/* Ticket status overview */}
         <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div>
             <h3 className="font-bold text-slate-900">
@@ -166,57 +399,90 @@ export default function Dashboard() {
             </p>
           </div>
 
-          <div className="mt-7 space-y-5">
-            <StatusProgress
-              label="New"
-              value={0}
-              total={0}
-            />
+          {loading ? (
+            <div className="flex min-h-72 items-center justify-center">
+              <Loader2
+                size={34}
+                className="animate-spin text-blue-600"
+              />
+            </div>
+          ) : (
+            <div className="mt-7 space-y-5">
+              <StatusProgress
+                label="Pending"
+                value={stats.pending}
+                total={stats.total}
+                barClass="bg-orange-500"
+              />
 
-            <StatusProgress
-              label="In Progress"
-              value={0}
-              total={0}
-            />
+              <StatusProgress
+                label="Assigned"
+                value={stats.assigned}
+                total={stats.total}
+                barClass="bg-cyan-500"
+              />
 
-            <StatusProgress
-              label="Resolved"
-              value={0}
-              total={0}
-            />
+              <StatusProgress
+                label="In Progress"
+                value={stats.inProgress}
+                total={stats.total}
+                barClass="bg-violet-600"
+              />
 
-            <StatusProgress
-              label="Closed"
-              value={0}
-              total={0}
-            />
-          </div>
+              <StatusProgress
+                label="Resolved"
+                value={stats.resolved}
+                total={stats.total}
+                barClass="bg-emerald-500"
+              />
+
+              <StatusProgress
+                label="Closed"
+                value={stats.closed}
+                total={stats.total}
+                barClass="bg-slate-500"
+              />
+            </div>
+          )}
         </article>
       </section>
     </div>
   );
 }
 
-function StatusProgress({ label, value, total }) {
+function StatusProgress({
+  label,
+  value,
+  total,
+  barClass = "bg-blue-600",
+}) {
   const percentage =
     total > 0 ? Math.round((value / total) * 100) : 0;
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-4">
         <span className="text-sm font-medium text-slate-700">
           {label}
         </span>
 
-        <span className="text-sm font-semibold text-slate-900">
-          {value}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400">
+            {percentage}%
+          </span>
+
+          <span className="min-w-5 text-right text-sm font-semibold text-slate-900">
+            {value}
+          </span>
+        </div>
       </div>
 
       <div className="h-2 overflow-hidden rounded-full bg-slate-100">
         <div
-          className="h-full rounded-full bg-blue-600 transition-all"
-          style={{ width: `${percentage}%` }}
+          className={`h-full rounded-full transition-all duration-500 ${barClass}`}
+          style={{
+            width: `${percentage}%`,
+          }}
         />
       </div>
     </div>

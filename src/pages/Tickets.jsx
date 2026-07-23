@@ -230,7 +230,6 @@ export default function AllTickets() {
       ).length,
       inProgress: tickets.filter(
         (ticketItem) =>
-          ticketItem.status === "Assigned" ||
           ticketItem.status === "In Progress"
       ).length,
       resolved: tickets.filter(

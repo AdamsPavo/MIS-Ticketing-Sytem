@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  CalendarDays,
   LayoutDashboard,
   ListChecks,
   LogOut,
@@ -7,6 +8,7 @@ import {
   TicketCheck,
   UserCog,
   X,
+  ClipboardList,
 } from "lucide-react";
 
 import {
@@ -32,7 +34,8 @@ export default function Sidebar({
       label: "Dashboard",
       path: "/dashboard",
       icon: LayoutDashboard,
-      roles: ["admin",
+      roles: [
+        "admin",
         "IT_STAFF",
       ],
     },
@@ -44,6 +47,7 @@ export default function Sidebar({
         "admin",
         "IT_STAFF",
         "user",
+        "QA",
       ],
     },
     {
@@ -56,15 +60,27 @@ export default function Sidebar({
       ],
     },
     {
-  label: "My Tickets",
-  path: "/my-tickets",
-  icon: TicketCheck,
-  roles: [
-    "admin",
-    "IT_STAFF",
-    "user",
-  ],
-},
+      label: "My Tickets",
+      path: "/my-tickets",
+      icon: TicketCheck,
+      roles: [
+        "admin",
+        "IT_STAFF",
+        "user",
+        "QA",
+      ],
+    },
+    {
+      label: "Event Booking",
+      path: "/events",
+      icon: CalendarDays,
+      roles: [
+        "admin",
+        "IT_STAFF",
+        "user",
+        "QA",
+      ],
+    },
     {
       label: "Reports",
       path: "/reports",
@@ -72,12 +88,17 @@ export default function Sidebar({
       roles: ["admin"],
     },
     {
+      label: "IT Work Board",
+      path: "/it-work-board",
+      icon: ClipboardList,
+      roles: ["admin", "IT_STAFF", "user", "QA"],
+    },
+    {
       label: "User Management",
       path: "/settings/users",
       icon: UserCog,
       roles: ["admin"],
     },
-
   ];
 
   const menuItems = allMenuItems.filter(
@@ -90,6 +111,7 @@ export default function Sidebar({
   const handleLogout = async () => {
     try {
       await logout();
+
       navigate("/login", {
         replace: true,
       });
