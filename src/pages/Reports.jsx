@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   Download,
   FileBarChart,
   Loader2,
+  MapPin,
   Printer,
   RefreshCw,
   TicketCheck,
@@ -50,6 +52,22 @@ const STATUS_COLORS = {
   "In Progress": "#8b5cf6",
   Resolved: "#10b981",
   Closed: "#64748b",
+};
+
+const EVENT_STATUS_ORDER = [
+  "Pending QA Approval",
+  "Confirmed",
+  "Completed",
+  "Rejected",
+  "Cancelled",
+];
+
+const EVENT_STATUS_COLORS = {
+  "Pending QA Approval": "#f59e0b",
+  Confirmed: "#3b82f6",
+  Completed: "#10b981",
+  Rejected: "#ef4444",
+  Cancelled: "#64748b",
 };
 
 const PRIORITY_COLORS = {
@@ -140,6 +158,52 @@ function formatDuration(hours) {
   return `${(hours / 24).toFixed(1)} days`;
 }
 
+
+function normalizeEventStatus(value) {
+  const status = normalizeText(value).toLowerCase();
+
+  if (status === "pending" || status === "pending qa approval") {
+    return "Pending QA Approval";
+  }
+  if (status === "confirmed" || status === "approved") return "Confirmed";
+  if (status === "completed") return "Completed";
+  if (status === "rejected") return "Rejected";
+  if (status === "cancelled" || status === "canceled") return "Cancelled";
+
+  return normalizeText(value) || "Pending QA Approval";
+}
+
+function getEventCreatedDate(eventItem) {
+  return getDateValue(eventItem.createdAt || eventItem.submittedAt);
+}
+
+function getEventVenue(eventItem) {
+  return eventItem.venue === "Other"
+    ? eventItem.otherVenue || "Other venue"
+    : eventItem.venue || "Unspecified";
+}
+
+function formatEventSchedule(eventItem) {
+  const date = eventItem.eventDate
+    ? formatDate(`${eventItem.eventDate}T00:00:00`)
+    : "No date";
+
+  const formatTime = (value) => {
+    if (!value) return "—";
+    const [hours, minutes] = String(value).split(":");
+    const time = new Date();
+    time.setHours(Number(hours), Number(minutes), 0, 0);
+    return new Intl.DateTimeFormat("en-PH", {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(time);
+  };
+
+  return `${date}, ${formatTime(eventItem.startTime)} – ${formatTime(
+    eventItem.endTime
+  )}`;
+}
+
 function getTicketTitle(ticket) {
   return (
     ticket.subject ||
@@ -217,7 +281,10 @@ function getResolvedDate(ticket) {
 
 export default function Reports() {
   const [tickets, setTickets] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [events, setEvents] = useState([]);
+  const [ticketsLoading, setTicketsLoading] = useState(true);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const loading = ticketsLoading || eventsLoading;
   const [loadError, setLoadError] = useState("");
 
   const [dateRange, setDateRange] = useState("30");
@@ -247,13 +314,13 @@ export default function Reports() {
         }));
 
         setTickets(data);
-        setLoading(false);
+        setTicketsLoading(false);
         setLoadError("");
       },
       (error) => {
         console.error("Unable to load report data:", error);
 
-        setLoading(false);
+        setTicketsLoading(false);
         setLoadError(
           error.message ||
             "Unable to load ticket reports."
@@ -264,13 +331,45 @@ export default function Reports() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const eventsQuery = query(
+      collection(db, "events"),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(
+      eventsQuery,
+      (snapshot) => {
+        setEvents(
+          snapshot.docs.map((document) => ({
+            id: document.id,
+            ...document.data(),
+          }))
+        );
+        setEventsLoading(false);
+      },
+      (error) => {
+        console.error("Unable to load event report data:", error);
+        setEventsLoading(false);
+        setLoadError(
+          error.message || "Unable to load event booking reports."
+        );
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   const departments = useMemo(() => {
     return [
-      ...new Set(tickets.map(getDepartment)),
+      ...new Set([
+        ...tickets.map(getDepartment),
+        ...events.map((eventItem) => eventItem.department || "Unspecified"),
+      ]),
     ]
       .filter(Boolean)
       .sort();
-  }, [tickets]);
+  }, [tickets, events]);
 
   const categories = useMemo(() => {
     return [
@@ -352,6 +451,95 @@ export default function Reports() {
     priorityFilter,
     staffFilter,
   ]);
+
+  const filteredEvents = useMemo(() => {
+    const selectedDays = Number(dateRange);
+    const startDate = new Date();
+
+    if (selectedDays > 0) {
+      startDate.setHours(0, 0, 0, 0);
+      startDate.setDate(startDate.getDate() - selectedDays);
+    }
+
+    return events.filter((eventItem) => {
+      const createdDate = getEventCreatedDate(eventItem);
+      const department = eventItem.department || "Unspecified";
+
+      const matchesDate =
+        selectedDays === 0 || !createdDate || createdDate >= startDate;
+      const matchesDepartment =
+        departmentFilter === "all" || department === departmentFilter;
+
+      return matchesDate && matchesDepartment;
+    });
+  }, [events, dateRange, departmentFilter]);
+
+  const eventAnalytics = useMemo(() => {
+    const statusCounts = Object.fromEntries(
+      EVENT_STATUS_ORDER.map((status) => [status, 0])
+    );
+    const departmentCounts = {};
+    const venueCounts = {};
+    const monthlyTrend = {};
+
+    filteredEvents.forEach((eventItem) => {
+      const status = normalizeEventStatus(eventItem.status);
+      const department = eventItem.department || "Unspecified";
+      const venue = getEventVenue(eventItem);
+      const createdDate = getEventCreatedDate(eventItem);
+
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+      departmentCounts[department] =
+        (departmentCounts[department] || 0) + 1;
+      venueCounts[venue] = (venueCounts[venue] || 0) + 1;
+
+      if (createdDate) {
+        const key = new Intl.DateTimeFormat("en-PH", {
+          month: "short",
+          year: "2-digit",
+        }).format(createdDate);
+
+        if (!monthlyTrend[key]) {
+          monthlyTrend[key] = {
+            name: key,
+            date: createdDate,
+            bookings: 0,
+            completed: 0,
+          };
+        }
+
+        monthlyTrend[key].bookings += 1;
+        if (status === "Completed") monthlyTrend[key].completed += 1;
+      }
+    });
+
+    const total = filteredEvents.length;
+    const completed = statusCounts.Completed || 0;
+
+    return {
+      total,
+      pending: statusCounts["Pending QA Approval"] || 0,
+      confirmed: statusCounts.Confirmed || 0,
+      completed,
+      rejected: statusCounts.Rejected || 0,
+      cancelled: statusCounts.Cancelled || 0,
+      completionRate:
+        total > 0 ? Math.round((completed / total) * 100) : 0,
+      statusData: EVENT_STATUS_ORDER.map((status) => ({
+        name: status,
+        value: statusCounts[status] || 0,
+      })),
+      departmentData: Object.entries(departmentCounts)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value),
+      venueData: Object.entries(venueCounts)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value),
+      trendData: Object.values(monthlyTrend)
+        .sort((a, b) => a.date.getTime() - b.date.getTime())
+        .map(({ date, ...item }) => item),
+    };
+  }, [filteredEvents]);
 
   const analytics = useMemo(() => {
     const statusCounts = {
@@ -708,41 +896,50 @@ export default function Reports() {
   };
 
   const exportToCsv = () => {
-    if (filteredTickets.length === 0) {
+    if (filteredTickets.length === 0 && filteredEvents.length === 0) {
       return;
     }
 
-    const rows = filteredTickets.map((ticket) => ({
-      "Ticket Number": getTicketNumber(ticket),
-      Subject: getTicketTitle(ticket),
+    const ticketRows = filteredTickets.map((ticket) => ({
+      "Record Type": "Ticket",
+      "Reference Number": getTicketNumber(ticket),
+      Title: getTicketTitle(ticket),
       Department: getDepartment(ticket),
       Category: getCategory(ticket),
       Priority: getPriority(ticket),
       Status: normalizeStatus(ticket.status),
-      "Assigned Staff": getAssignedStaff(ticket),
-      "Created Date": formatDate(
-        getCreatedDate(ticket),
-        true
-      ),
-      "Resolved Date": formatDate(
-        getResolvedDate(ticket),
-        true
-      ),
+      "Assigned Staff / Requester": getAssignedStaff(ticket),
+      "Venue / Schedule": "",
+      "Created Date": formatDate(getCreatedDate(ticket), true),
+      "Completed Date": formatDate(getResolvedDate(ticket), true),
     }));
 
+    const eventRows = filteredEvents.map((eventItem) => ({
+      "Record Type": "Event Booking",
+      "Reference Number": eventItem.eventNumber || eventItem.id,
+      Title: eventItem.eventTitle || "Untitled event",
+      Department: eventItem.department || "Unspecified",
+      Category: "Event Booking",
+      Priority: "",
+      Status: normalizeEventStatus(eventItem.status),
+      "Assigned Staff / Requester":
+        eventItem.requesterName || eventItem.requesterEmail || "Unknown",
+      "Venue / Schedule": `${getEventVenue(eventItem)} — ${formatEventSchedule(
+        eventItem
+      )}`,
+      "Created Date": formatDate(getEventCreatedDate(eventItem), true),
+      "Completed Date": formatDate(eventItem.completedAt, true),
+    }));
+
+    const rows = [...ticketRows, ...eventRows];
     const headers = Object.keys(rows[0]);
 
     const csvContent = [
-      headers
-        .map((header) => `"${header}"`)
-        .join(","),
+      headers.map((header) => `"${header}"`).join(","),
       ...rows.map((row) =>
         headers
           .map((header) => {
-            const value = String(
-              row[header] ?? ""
-            ).replace(/"/g, '""');
-
+            const value = String(row[header] ?? "").replace(/"/g, '""');
             return `"${value}"`;
           })
           .join(",")
@@ -754,18 +951,16 @@ export default function Reports() {
     });
 
     const fileUrl = URL.createObjectURL(blob);
-    const downloadLink =
-      document.createElement("a");
+    const downloadLink = document.createElement("a");
 
     downloadLink.href = fileUrl;
-    downloadLink.download = `MIS-Ticket-Report-${new Date()
+    downloadLink.download = `MIS-Combined-Report-${new Date()
       .toISOString()
       .slice(0, 10)}.csv`;
 
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
-
     URL.revokeObjectURL(fileUrl);
   };
 
@@ -831,9 +1026,8 @@ export default function Reports() {
           </h1>
 
           <p className="mt-2 max-w-2xl text-slate-500">
-            Monitor ticket volume, status distribution,
-            department concerns, priorities, and IT staff
-            performance.
+            Monitor ticket activity, event bookings, department
+            requests, status distribution, and MIS performance.
           </p>
         </div>
 
@@ -859,7 +1053,7 @@ export default function Reports() {
           <button
             type="button"
             onClick={exportToCsv}
-            disabled={filteredTickets.length === 0}
+            disabled={filteredTickets.length === 0 && filteredEvents.length === 0}
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           >
             <Download size={17} />
@@ -1053,6 +1247,205 @@ export default function Reports() {
                 </article>
               );
             })}
+          </section>
+
+          {/* Event booking report */}
+          <section className="mt-7">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-xl bg-indigo-50 p-3 text-indigo-600">
+                <CalendarDays size={22} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Event Booking Report
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Event requests matching the selected date and department filters
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
+              {[
+                ["Total Events", eventAnalytics.total, "bg-indigo-50 text-indigo-600"],
+                ["Pending QA", eventAnalytics.pending, "bg-amber-50 text-amber-600"],
+                ["Confirmed", eventAnalytics.confirmed, "bg-blue-50 text-blue-600"],
+                ["Completed", eventAnalytics.completed, "bg-emerald-50 text-emerald-600"],
+                ["Rejected / Cancelled", eventAnalytics.rejected + eventAnalytics.cancelled, "bg-red-50 text-red-600"],
+              ].map(([title, value, iconClass]) => (
+                <article
+                  key={title}
+                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+                >
+                  <div className={`w-fit rounded-xl p-2.5 ${iconClass}`}>
+                    <CalendarDays size={20} />
+                  </div>
+                  <p className="mt-4 text-3xl font-bold text-slate-900">
+                    {value}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-700">
+                    {title}
+                  </p>
+                </article>
+              ))}
+            </div>
+
+            <div className="mt-6 grid gap-6 xl:grid-cols-2">
+              <ChartCard
+                title="Event status distribution"
+                description="Current approval and completion status of event bookings"
+              >
+                {eventAnalytics.total === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <>
+                    <ResponsiveContainer width="100%" height={230}>
+                      <PieChart>
+                        <Pie
+                          data={eventAnalytics.statusData}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={52}
+                          outerRadius={88}
+                          paddingAngle={3}
+                        >
+                          {eventAnalytics.statusData.map((entry) => (
+                            <Cell
+                              key={entry.name}
+                              fill={EVENT_STATUS_COLORS[entry.name]}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+
+                    <div className="space-y-2">
+                      {eventAnalytics.statusData.map((entry) => (
+                        <div
+                          key={entry.name}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span className="flex items-center gap-2 text-slate-600">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{
+                                backgroundColor:
+                                  EVENT_STATUS_COLORS[entry.name],
+                              }}
+                            />
+                            {entry.name}
+                          </span>
+                          <span className="font-semibold text-slate-900">
+                            {entry.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </ChartCard>
+
+              <ChartCard
+                title="Events by department"
+                description="Departments with the most event booking requests"
+              >
+                {eventAnalytics.departmentData.length === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <ResponsiveContainer width="100%" height={330}>
+                    <BarChart
+                      data={eventAnalytics.departmentData.slice(0, 10)}
+                      layout="vertical"
+                      margin={{ top: 5, right: 20, left: 40, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" allowDecimals={false} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={110}
+                        tick={{ fontSize: 11 }}
+                      />
+                      <Tooltip />
+                      <Bar
+                        dataKey="value"
+                        name="Events"
+                        fill="#4f46e5"
+                        radius={[0, 6, 6, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </ChartCard>
+            </div>
+
+            <div className="mt-6">
+              <TableCard
+                title="Event booking details"
+                description={`${eventAnalytics.total} event booking(s) in the selected report period`}
+                icon={CalendarDays}
+                iconClass="bg-indigo-50 text-indigo-600"
+              >
+                <table className="min-w-[1100px] w-full">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <TableHeader>Event</TableHeader>
+                      <TableHeader>Department</TableHeader>
+                      <TableHeader>Venue</TableHeader>
+                      <TableHeader>Schedule</TableHeader>
+                      <TableHeader>Requester</TableHeader>
+                      <TableHeader>Participants</TableHeader>
+                      <TableHeader>Status</TableHeader>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredEvents.length === 0 ? (
+                      <EmptyTable
+                        colSpan={7}
+                        message="No event bookings match the selected filters."
+                      />
+                    ) : (
+                      filteredEvents.map((eventItem) => (
+                        <tr key={eventItem.id} className="hover:bg-slate-50">
+                          <TableCell>
+                            <p className="max-w-60 truncate font-semibold text-slate-800">
+                              {eventItem.eventTitle || "Untitled event"}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-400">
+                              {eventItem.eventNumber || eventItem.id}
+                            </p>
+                          </TableCell>
+                          <TableCell>
+                            {eventItem.department || "Unspecified"}
+                          </TableCell>
+                          <TableCell>
+                            <span className="inline-flex items-center gap-1.5">
+                              <MapPin size={14} className="text-slate-400" />
+                              {getEventVenue(eventItem)}
+                            </span>
+                          </TableCell>
+                          <TableCell>{formatEventSchedule(eventItem)}</TableCell>
+                          <TableCell>
+                            {eventItem.requesterName ||
+                              eventItem.requesterEmail ||
+                              "Unknown"}
+                          </TableCell>
+                          <TableCell>
+                            {eventItem.expectedParticipants || "—"}
+                          </TableCell>
+                          <TableCell>
+                            <EventStatusBadge
+                              status={normalizeEventStatus(eventItem.status)}
+                            />
+                          </TableCell>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </TableCard>
+            </div>
           </section>
 
           {/* Ticket trend and status */}
@@ -1787,6 +2180,29 @@ function StatusBadge({ status }) {
       className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
         styles[status] ||
         "bg-blue-50 text-blue-700 ring-blue-600/20"
+      }`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function EventStatusBadge({ status }) {
+  const styles = {
+    "Pending QA Approval":
+      "bg-amber-50 text-amber-700 ring-amber-600/20",
+    Confirmed: "bg-blue-50 text-blue-700 ring-blue-600/20",
+    Completed:
+      "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+    Rejected: "bg-red-50 text-red-700 ring-red-600/20",
+    Cancelled: "bg-slate-100 text-slate-700 ring-slate-600/20",
+  };
+
+  return (
+    <span
+      className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
+        styles[status] ||
+        "bg-indigo-50 text-indigo-700 ring-indigo-600/20"
       }`}
     >
       {status}

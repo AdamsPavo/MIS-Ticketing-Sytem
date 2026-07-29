@@ -287,8 +287,45 @@ export default function ITWorkBoard() {
         .toLowerCase() === "in progress"
   );
 
-  // Do nothing when the IT staff has no In Progress ticket.
+  // If there is no active In Progress ticket, automatically set the staff back to Available.
   if (!inProgressTicket) {
+    const boardAlreadyAvailable =
+      myCurrentPost?.status === "Available";
+
+    if (boardAlreadyAvailable) {
+      return;
+    }
+
+    const setAvailableAutomatically = async () => {
+      try {
+        const staffName = getUserName(userProfile, currentUser);
+
+        await setDoc(
+          doc(db, "itWorkBoard", currentUser.uid),
+          {
+            uid: currentUser.uid,
+            fullName: staffName,
+            email: currentUser.email || "",
+            department: userProfile?.department || "MIS",
+            status: "Available",
+            activity: "Ready to assist with IT concerns",
+            location: "MIS Office",
+            ticketNumber: "",
+            estimatedFinish: "",
+            createdAt: myCurrentPost?.createdAt || serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            updatedByUid: currentUser.uid,
+            updatedByName: staffName,
+            updatedAutomatically: true,
+          },
+          { merge: true }
+        );
+      } catch (error) {
+        console.error("Unable to automatically set Available:", error);
+      }
+    };
+
+    setAvailableAutomatically();
     return;
   }
 

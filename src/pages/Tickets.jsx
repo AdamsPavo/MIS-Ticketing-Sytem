@@ -10,6 +10,7 @@ import {
   Ticket,
   UserCheck,
   RotateCcw,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -22,6 +23,9 @@ import {
   updateDoc,
   increment,
   runTransaction,
+  deleteDoc,
+  getDocs,
+  writeBatch,
 } from "firebase/firestore";
 
 import { db } from "../firebase/firebase";
@@ -518,16 +522,157 @@ export default function AllTickets() {
     }
   };
 
+  const deleteSelectedTicket = async () => {
+    if (userProfile?.role !== "admin") {
+      setMessage({
+        type: "error",
+        text: "Only the administrator can delete tickets.",
+      });
+      return;
+    }
+
+    if (!selectedTicket) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete ${
+        selectedTicket.ticketNumber || "this ticket"
+      }? This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage({ type: "", text: "" });
+
+    try {
+      await deleteDoc(doc(db, "tickets", selectedTicket.id));
+
+      setSelectedTicket(null);
+      setRemarks("");
+      setReleaseReason("");
+      setSelectedStatus("Pending");
+
+      setMessage({
+        type: "success",
+        text: "Ticket deleted successfully.",
+      });
+    } catch (error) {
+      console.error("Unable to delete ticket:", error);
+
+      setMessage({
+        type: "error",
+        text: error.message || "Unable to delete the ticket.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteAllTickets = async () => {
+    if (userProfile?.role !== "admin") {
+      setMessage({
+        type: "error",
+        text: "Only the administrator can delete all tickets.",
+      });
+      return;
+    }
+
+    if (tickets.length === 0) {
+      setMessage({
+        type: "error",
+        text: "There are no tickets to delete.",
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete all ${tickets.length} tickets? This action cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const finalConfirmation = window.confirm(
+      "Final confirmation: Delete every ticket now?"
+    );
+
+    if (!finalConfirmation) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage({ type: "", text: "" });
+
+    try {
+      const snapshot = await getDocs(collection(db, "tickets"));
+      const documents = snapshot.docs;
+      const batchSize = 450;
+
+      for (let index = 0; index < documents.length; index += batchSize) {
+        const batch = writeBatch(db);
+        const documentChunk = documents.slice(index, index + batchSize);
+
+        documentChunk.forEach((ticketDocument) => {
+          batch.delete(ticketDocument.ref);
+        });
+
+        await batch.commit();
+      }
+
+      setSelectedTicket(null);
+      setRemarks("");
+      setReleaseReason("");
+      setSelectedStatus("Pending");
+
+      setMessage({
+        type: "success",
+        text: "All tickets were deleted successfully.",
+      });
+    } catch (error) {
+      console.error("Unable to delete all tickets:", error);
+
+      setMessage({
+        type: "error",
+        text: error.message || "Unable to delete all tickets.",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">
-          All Tickets
-        </h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            All Tickets
+          </h1>
 
-        <p className="mt-2 text-slate-500">
-          View, assign, and manage department concerns.
-        </p>
+          <p className="mt-2 text-slate-500">
+            View, assign, and manage department concerns.
+          </p>
+        </div>
+
+        {userProfile?.role === "admin" && (
+          <button
+            type="button"
+            onClick={deleteAllTickets}
+            disabled={saving || tickets.length === 0}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+          >
+            {saving ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Trash2 size={18} />
+            )}
+            Delete All Tickets
+          </button>
+        )}
       </div>
 
       {message.text && !selectedTicket && (
@@ -1062,6 +1207,22 @@ export default function AllTickets() {
             </div>
 
             <div className="sticky bottom-0 flex flex-col-reverse gap-3 border-t border-slate-200 bg-white p-5 sm:flex-row sm:justify-end">
+              {userProfile?.role === "admin" && (
+                <button
+                  type="button"
+                  onClick={deleteSelectedTicket}
+                  disabled={saving}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-5 py-3 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+                >
+                  {saving ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={18} />
+                  )}
+                  Delete Ticket
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={closeTicket}

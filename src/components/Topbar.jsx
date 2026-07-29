@@ -1,20 +1,32 @@
 import {
   Bell,
   Menu,
+  PanelLeftClose,
   Search,
 } from "lucide-react";
 
-export default function Topbar({ openSidebar }) {
+export default function Topbar({
+  openSidebar,
+  sidebarOpen,
+}) {
   return (
-    <header className="sticky top-0 z-30 flex h-18.25 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-30 flex h-[73px] items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={openSidebar}
-          className="rounded-xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50 lg:hidden"
-          aria-label="Open sidebar"
+          className="rounded-xl border border-slate-200 p-2.5 text-slate-600 transition hover:bg-slate-50"
+          aria-label={
+            sidebarOpen
+              ? "Close sidebar"
+              : "Open sidebar"
+          }
         >
-          <Menu size={21} />
+          {sidebarOpen ? (
+            <PanelLeftClose size={21} />
+          ) : (
+            <Menu size={21} />
+          )}
         </button>
 
         <div>

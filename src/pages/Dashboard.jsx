@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   Loader2,
+  MapPin,
   Tickets,
   TriangleAlert,
 } from "lucide-react";
@@ -73,13 +75,52 @@ const getStatusStyle = (status) => {
   }
 };
 
+
+const formatEventDate = (dateValue) => {
+  if (!dateValue) return "No date";
+
+  const date = new Date(`${dateValue}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return dateValue;
+  }
+
+  return new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatEventTime = (timeValue) => {
+  if (!timeValue) return "No time";
+
+  const [hours, minutes] = String(timeValue).split(":");
+  const date = new Date();
+
+  date.setHours(Number(hours), Number(minutes), 0, 0);
+
+  return new Intl.DateTimeFormat("en-PH", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+};
+
+const getEventVenue = (eventItem) =>
+  eventItem?.venue === "Other"
+    ? eventItem?.otherVenue || "Other venue"
+    : eventItem?.venue || "No venue";
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
 
   const [tickets, setTickets] = useState([]);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [eventsLoading, setEventsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [eventLoadError, setEventLoadError] = useState("");
 
   useEffect(() => {
     const ticketsQuery = query(
@@ -105,6 +146,37 @@ export default function Dashboard() {
         setLoading(false);
         setLoadError(
           error.message || "Unable to load dashboard ticket information."
+        );
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const eventsQuery = query(
+      collection(db, "events"),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(
+      eventsQuery,
+      (snapshot) => {
+        const eventData = snapshot.docs.map((eventDocument) => ({
+          id: eventDocument.id,
+          ...eventDocument.data(),
+        }));
+
+        setEvents(eventData);
+        setEventsLoading(false);
+        setEventLoadError("");
+      },
+      (error) => {
+        console.error("Unable to load dashboard events:", error);
+
+        setEventsLoading(false);
+        setEventLoadError(
+          error.message || "Unable to load upcoming event information."
         );
       }
     );
@@ -165,7 +237,50 @@ export default function Dashboard() {
     [stats]
   );
 
-  const recentTickets = tickets.slice(0, 5);
+  const newTickets = useMemo(() => {
+    return tickets
+      .filter((ticket) => {
+        const status = normalizeStatus(ticket.status);
+
+        return status === "pending" || status === "new";
+      })
+      .slice(0, 5);
+  }, [tickets]);
+
+  const upcomingEvents = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return events
+      .filter((eventItem) => {
+        const eventDate = eventItem.eventDate
+          ? new Date(`${eventItem.eventDate}T00:00:00`)
+          : null;
+
+        const normalizedEventStatus = normalizeStatus(eventItem.status);
+
+        return (
+          eventDate &&
+          !Number.isNaN(eventDate.getTime()) &&
+          eventDate >= today &&
+          normalizedEventStatus !== "rejected" &&
+          normalizedEventStatus !== "cancelled" &&
+          normalizedEventStatus !== "completed"
+        );
+      })
+      .sort((firstEvent, secondEvent) => {
+        const firstDateTime = new Date(
+          `${firstEvent.eventDate}T${firstEvent.startTime || "00:00"}:00`
+        ).getTime();
+
+        const secondDateTime = new Date(
+          `${secondEvent.eventDate}T${secondEvent.startTime || "00:00"}:00`
+        ).getTime();
+
+        return firstDateTime - secondDateTime;
+      })
+      .slice(0, 5);
+  }, [events]);
 
   const openTicket = (ticket) => {
     /*
@@ -210,6 +325,15 @@ export default function Dashboard() {
           className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
         >
           {loadError}
+        </div>
+      )}
+
+      {eventLoadError && (
+        <div
+          role="alert"
+          className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+        >
+          {eventLoadError}
         </div>
       )}
 
@@ -259,16 +383,16 @@ export default function Dashboard() {
       </section>
 
       <section className="mt-7 grid gap-6 xl:grid-cols-[1.6fr_1fr]">
-        {/* Recent tickets */}
+        {/* New tickets */}
         <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-5">
             <div>
               <h3 className="font-bold text-slate-900">
-                Recent tickets
+                New tickets
               </h3>
 
               <p className="mt-1 text-sm text-slate-500">
-                Latest support concerns submitted by departments
+                Pending tickets waiting for MIS action
               </p>
             </div>
 
@@ -295,24 +419,23 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-          ) : recentTickets.length === 0 ? (
+          ) : newTickets.length === 0 ? (
             <div className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center">
               <div className="rounded-2xl bg-blue-50 p-4 text-blue-600">
                 <Tickets size={38} />
               </div>
 
               <h4 className="mt-5 text-lg font-bold text-slate-900">
-                No tickets available
+                No pending tickets
               </h4>
 
               <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                New tickets submitted by departments will appear in
-                this section.
+                All pending ticket requests waiting for MIS action will appear here.
               </p>
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {recentTickets.map((ticket) => {
+              {newTickets.map((ticket) => {
                 const title =
                   ticket.subject ||
                   ticket.title ||
@@ -436,12 +559,125 @@ export default function Dashboard() {
                 barClass="bg-emerald-500"
               />
 
-              <StatusProgress
-                label="Closed"
-                value={stats.closed}
-                total={stats.total}
-                barClass="bg-slate-500"
-              />
+            
+            </div>
+          )}
+        </article>
+      </section>
+
+      {/* Upcoming events */}
+      <section className="mt-7">
+        <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between gap-4 border-b border-slate-100 px-6 py-5">
+            <div>
+              <h3 className="font-bold text-slate-900">
+                Upcoming events
+              </h3>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Confirmed and pending event bookings scheduled from today onward
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => navigate("/events")}
+              className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-blue-600 transition hover:text-blue-700"
+            >
+              View all
+              <ArrowRight size={16} />
+            </button>
+          </div>
+
+          {eventsLoading ? (
+            <div className="flex min-h-64 items-center justify-center">
+              <div className="flex flex-col items-center text-slate-500">
+                <Loader2
+                  size={34}
+                  className="animate-spin text-blue-600"
+                />
+
+                <p className="mt-3 text-sm">
+                  Loading upcoming events...
+                </p>
+              </div>
+            </div>
+          ) : upcomingEvents.length === 0 ? (
+            <div className="flex min-h-64 flex-col items-center justify-center px-6 py-12 text-center">
+              <div className="rounded-2xl bg-blue-50 p-4 text-blue-600">
+                <CalendarDays size={38} />
+              </div>
+
+              <h4 className="mt-5 text-lg font-bold text-slate-900">
+                No upcoming events
+              </h4>
+
+              <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+                Future event bookings will appear here after they are submitted.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
+              {upcomingEvents.map((eventItem) => (
+                <button
+                  key={eventItem.id}
+                  type="button"
+                  onClick={() =>
+                    navigate("/events", {
+                      state: {
+                        selectedEventId: eventItem.id,
+                      },
+                    })
+                  }
+                  className="rounded-2xl border border-slate-200 p-5 text-left transition hover:border-blue-300 hover:bg-blue-50/40 hover:shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                        {eventItem.eventNumber || "Event booking"}
+                      </p>
+
+                      <h4 className="mt-1 truncate font-bold text-slate-900">
+                        {eventItem.eventTitle || "Untitled event"}
+                      </h4>
+                    </div>
+
+                    <span className="inline-flex shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+                      {eventItem.status || "Pending QA Approval"}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 space-y-2 text-sm text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays
+                        size={16}
+                        className="shrink-0 text-slate-400"
+                      />
+
+                      <span>
+                        {formatEventDate(eventItem.eventDate)}
+                        {" · "}
+                        {formatEventTime(eventItem.startTime)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <MapPin
+                        size={16}
+                        className="shrink-0 text-slate-400"
+                      />
+
+                      <span className="truncate">
+                        {getEventVenue(eventItem)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="mt-4 text-sm font-medium text-slate-700">
+                    {eventItem.department || "No department"}
+                  </p>
+                </button>
+              ))}
             </div>
           )}
         </article>
