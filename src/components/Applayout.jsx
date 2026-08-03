@@ -23,7 +23,7 @@ export default function AppLayout() {
       />
 
       <div
-        className={`min-h-screen transition-all duration-300 ${
+        className={`min-h-screen min-w-0 transition-all duration-300 ${
           sidebarOpen ? "lg:pl-72" : "lg:pl-0"
         }`}
       >
@@ -32,7 +32,7 @@ export default function AppLayout() {
           sidebarOpen={sidebarOpen}
         />
 
-        <main className="min-h-[calc(100vh-73px)] p-4 sm:p-6 lg:p-8">
+        <main className="min-h-[calc(100vh-73px)] min-w-0 overflow-x-hidden p-3 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>

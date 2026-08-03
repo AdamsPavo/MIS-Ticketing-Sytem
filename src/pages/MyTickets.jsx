@@ -615,7 +615,7 @@ export default function MyTickets() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">
+        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
           My Tickets
         </h1>
 
@@ -654,7 +654,7 @@ export default function MyTickets() {
       </div>
 
       <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overscroll-x-contain">
           <table className="w-full min-w-[1100px]">
             <thead className="bg-slate-50">
               <tr className="text-left text-sm text-slate-500">

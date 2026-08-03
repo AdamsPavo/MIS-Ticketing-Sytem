@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
@@ -15,8 +16,13 @@ import {
   NavLink,
   useNavigate,
 } from "react-router-dom";
+import {
+  collection,
+  onSnapshot,
+} from "firebase/firestore";
 
 import { useAuth } from "../context/AuthContext";
+import { db } from "../firebase/firebase";
 
 export default function Sidebar({
   open,
@@ -25,9 +31,90 @@ export default function Sidebar({
   const navigate = useNavigate();
 
   const {
+    currentUser,
     userProfile,
     logout,
   } = useAuth();
+  const [notificationCounts, setNotificationCounts] = useState({
+    tickets: 0,
+    events: 0,
+    confirmations: 0,
+  });
+
+  useEffect(() => {
+    if (!currentUser || !userProfile?.role) return undefined;
+
+    const role = userProfile.role;
+
+    const unsubscribeTickets = onSnapshot(
+      collection(db, "tickets"),
+      (snapshot) => {
+        let tickets = 0;
+        let confirmations = 0;
+
+        snapshot.docs.forEach((document) => {
+          const ticket = document.data();
+
+          if (
+            (role === "admin" || role === "IT_STAFF") &&
+            ticket.status === "Pending"
+          ) {
+            tickets += 1;
+          }
+
+          if (
+            ticket.requesterUid === currentUser.uid &&
+            ticket.status === "Waiting for Confirmation" &&
+            ticket.userConfirmedResolved !== true
+          ) {
+            confirmations += 1;
+          }
+        });
+
+        setNotificationCounts((previous) => ({
+          ...previous,
+          tickets,
+          confirmations,
+        }));
+      },
+      (error) => {
+        console.error("Unable to load sidebar ticket badges:", error);
+      }
+    );
+
+    let unsubscribeEvents = () => {};
+
+    if (role === "QA") {
+      unsubscribeEvents = onSnapshot(
+        collection(db, "events"),
+        (snapshot) => {
+          const events = snapshot.docs.filter((document) =>
+            ["Pending", "Pending QA Approval"].includes(
+              document.data().status
+            )
+          ).length;
+
+          setNotificationCounts((previous) => ({
+            ...previous,
+            events,
+          }));
+        },
+        (error) => {
+          console.error("Unable to load sidebar event badges:", error);
+        }
+      );
+    } else {
+      setNotificationCounts((previous) => ({
+        ...previous,
+        events: 0,
+      }));
+    }
+
+    return () => {
+      unsubscribeTickets();
+      unsubscribeEvents();
+    };
+  }, [currentUser, userProfile?.role]);
 
   const allMenuItems = [
     {
@@ -117,6 +204,22 @@ export default function Sidebar({
     setOpen(false);
   };
 
+  const getNotificationCount = (path) => {
+    if (path === "/all-tickets") {
+      return notificationCounts.tickets;
+    }
+
+    if (path === "/my-tickets") {
+      return notificationCounts.confirmations;
+    }
+
+    if (path === "/events") {
+      return notificationCounts.events;
+    }
+
+    return 0;
+  };
+
   const handleLogout = async () => {
     try {
       closeSidebar();
@@ -199,7 +302,10 @@ export default function Sidebar({
             label,
             path,
             icon: Icon,
-          }) => (
+          }) => {
+            const notificationCount = getNotificationCount(path);
+
+            return (
             <NavLink
               key={path}
               to={path}
@@ -219,11 +325,20 @@ export default function Sidebar({
                 className="shrink-0"
               />
 
-              <span className="truncate">
+              <span className="min-w-0 flex-1 truncate">
                 {label}
               </span>
+
+              {notificationCount > 0 && (
+                <span className="ml-auto inline-flex min-w-6 shrink-0 items-center justify-center rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-bold text-white ring-2 ring-slate-950">
+                  {notificationCount > 99
+                    ? "99+"
+                    : notificationCount}
+                </span>
+              )}
             </NavLink>
-          )
+            );
+          }
         )}
       </nav>
 

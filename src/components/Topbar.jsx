@@ -1,9 +1,6 @@
-import {
-  Bell,
-  Menu,
-  PanelLeftClose,
-  Search,
-} from "lucide-react";
+import { Menu, PanelLeftClose, Search } from "lucide-react";
+
+import NotificationBell from "./NotificationBell";
 
 export default function Topbar({
   openSidebar,
@@ -11,7 +8,7 @@ export default function Topbar({
 }) {
   return (
     <header className="sticky top-0 z-30 flex h-[73px] items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-3">
         <button
           type="button"
           onClick={openSidebar}
@@ -29,8 +26,8 @@ export default function Topbar({
           )}
         </button>
 
-        <div>
-          <p className="text-sm font-semibold text-slate-900">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold text-slate-900 sm:text-sm">
             Management Information Systems
           </p>
 
@@ -40,7 +37,7 @@ export default function Topbar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="ml-2 flex shrink-0 items-center gap-2">
         <div className="relative hidden md:block">
           <Search
             size={18}
@@ -54,15 +51,7 @@ export default function Topbar({
           />
         </div>
 
-        <button
-          type="button"
-          className="relative rounded-xl border border-slate-200 p-2.5 text-slate-600 transition hover:bg-slate-50"
-          aria-label="Notifications"
-        >
-          <Bell size={20} />
-
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500" />
-        </button>
+        <NotificationBell />
       </div>
     </header>
   );

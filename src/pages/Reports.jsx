@@ -11,7 +11,6 @@ import {
   MapPin,
   Printer,
   RefreshCw,
-  TicketCheck,
   Tickets,
   Users,
 } from "lucide-react";
@@ -822,69 +821,7 @@ export default function Reports() {
     };
   }, [filteredTickets, dateRange]);
 
-  const overdueTickets = useMemo(() => {
-    const now = new Date();
-
-    return filteredTickets
-      .filter((ticket) => {
-        const status = normalizeStatus(ticket.status);
-
-        if (
-          status === "Resolved" ||
-          status === "Closed"
-        ) {
-          return false;
-        }
-
-        const createdDate = getCreatedDate(ticket);
-
-        if (!createdDate) return false;
-
-        const ageInHours =
-          (now.getTime() - createdDate.getTime()) /
-          (1000 * 60 * 60);
-
-        return ageInHours >= 72;
-      })
-      .map((ticket) => {
-        const createdDate = getCreatedDate(ticket);
-
-        return {
-          ...ticket,
-          ageInDays: createdDate
-            ? Math.floor(
-                (now.getTime() -
-                  createdDate.getTime()) /
-                  (1000 * 60 * 60 * 24)
-              )
-            : 0,
-        };
-      })
-      .sort(
-        (a, b) => b.ageInDays - a.ageInDays
-      );
-  }, [filteredTickets]);
-
-  const recentlyCompleted = useMemo(() => {
-    return filteredTickets
-      .filter((ticket) => {
-        const status = normalizeStatus(ticket.status);
-
-        return (
-          status === "Resolved" ||
-          status === "Closed"
-        );
-      })
-      .sort((a, b) => {
-        const firstDate =
-          getResolvedDate(a)?.getTime() || 0;
-        const secondDate =
-          getResolvedDate(b)?.getTime() || 0;
-
-        return secondDate - firstDate;
-      })
-      .slice(0, 8);
-  }, [filteredTickets]);
+ 
 
   const resetFilters = () => {
     setDateRange("30");
@@ -994,22 +931,6 @@ export default function Reports() {
       iconClass:
         "bg-emerald-50 text-emerald-600",
     },
-    {
-      title: "Average Resolution",
-      value: formatDuration(
-        analytics.averageResolutionHours
-      ),
-      description: "Average completion time",
-      icon: TicketCheck,
-      iconClass: "bg-cyan-50 text-cyan-600",
-    },
-    {
-      title: "Overdue",
-      value: overdueTickets.length,
-      description: "Open for at least 3 days",
-      icon: AlertTriangle,
-      iconClass: "bg-red-50 text-red-600",
-    },
   ];
 
   return (
@@ -1021,7 +942,7 @@ export default function Reports() {
             MIS reports and analytics
           </p>
 
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+          <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
             Reports
           </h1>
 
@@ -1031,11 +952,11 @@ export default function Reports() {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3 print:hidden">
+        <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap print:hidden">
           <button
             type="button"
             onClick={resetFilters}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
             <RefreshCw size={17} />
             Reset filters
@@ -1044,7 +965,7 @@ export default function Reports() {
           <button
             type="button"
             onClick={() => window.print()}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
             <Printer size={17} />
             Print
@@ -1054,7 +975,7 @@ export default function Reports() {
             type="button"
             onClick={exportToCsv}
             disabled={filteredTickets.length === 0 && filteredEvents.length === 0}
-            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           >
             <Download size={17} />
             Export CSV
@@ -1906,140 +1827,6 @@ export default function Reports() {
             </TableCard>
           </section>
 
-          {/* Overdue and recent completed */}
-          <section className="mt-6 grid gap-6 xl:grid-cols-2">
-            <TableCard
-              title="Overdue tickets"
-              description="Open tickets that are at least three days old"
-              icon={AlertTriangle}
-              iconClass="bg-red-50 text-red-600"
-            >
-              <table className="min-w-full">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <TableHeader>Ticket</TableHeader>
-                    <TableHeader>
-                      Department
-                    </TableHeader>
-                    <TableHeader>Status</TableHeader>
-                    <TableHeader>Age</TableHeader>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {overdueTickets.length === 0 ? (
-                    <EmptyTable
-                      colSpan={4}
-                      message="No overdue tickets."
-                    />
-                  ) : (
-                    overdueTickets
-                      .slice(0, 8)
-                      .map((ticket) => (
-                        <tr
-                          key={ticket.id}
-                          className="hover:bg-slate-50"
-                        >
-                          <TableCell>
-                            <p className="max-w-56 truncate font-semibold text-slate-800">
-                              {getTicketTitle(ticket)}
-                            </p>
-
-                            <p className="mt-1 text-xs text-slate-400">
-                              #{getTicketNumber(ticket)}
-                            </p>
-                          </TableCell>
-
-                          <TableCell>
-                            {getDepartment(ticket)}
-                          </TableCell>
-
-                          <TableCell>
-                            <StatusBadge
-                              status={normalizeStatus(
-                                ticket.status
-                              )}
-                            />
-                          </TableCell>
-
-                          <TableCell>
-                            <span className="font-semibold text-red-600">
-                              {ticket.ageInDays} days
-                            </span>
-                          </TableCell>
-                        </tr>
-                      ))
-                  )}
-                </tbody>
-              </table>
-            </TableCard>
-
-            <TableCard
-              title="Recently completed tickets"
-              description="Latest tickets marked as resolved or closed"
-              icon={CheckCircle2}
-              iconClass="bg-emerald-50 text-emerald-600"
-            >
-              <table className="min-w-full">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <TableHeader>Ticket</TableHeader>
-                    <TableHeader>
-                      Assigned Staff
-                    </TableHeader>
-                    <TableHeader>Status</TableHeader>
-                    <TableHeader>
-                      Completed
-                    </TableHeader>
-                  </tr>
-                </thead>
-
-                <tbody className="divide-y divide-slate-100">
-                  {recentlyCompleted.length === 0 ? (
-                    <EmptyTable
-                      colSpan={4}
-                      message="No completed tickets available."
-                    />
-                  ) : (
-                    recentlyCompleted.map((ticket) => (
-                      <tr
-                        key={ticket.id}
-                        className="hover:bg-slate-50"
-                      >
-                        <TableCell>
-                          <p className="max-w-56 truncate font-semibold text-slate-800">
-                            {getTicketTitle(ticket)}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-400">
-                            #{getTicketNumber(ticket)}
-                          </p>
-                        </TableCell>
-
-                        <TableCell>
-                          {getAssignedStaff(ticket)}
-                        </TableCell>
-
-                        <TableCell>
-                          <StatusBadge
-                            status={normalizeStatus(
-                              ticket.status
-                            )}
-                          />
-                        </TableCell>
-
-                        <TableCell>
-                          {formatDate(
-                            getResolvedDate(ticket)
-                          )}
-                        </TableCell>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </TableCard>
-          </section>
         </>
       )}
     </div>

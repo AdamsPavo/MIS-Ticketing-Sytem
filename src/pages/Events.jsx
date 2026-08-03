@@ -15,7 +15,6 @@ import {
   Eye,
   Loader2,
   MapPin,
-  Menu,
   Plus,
   Search,
   X,
@@ -24,7 +23,6 @@ import {
 
 import { db } from "../firebase/firebase";
 import { useAuth } from "../context/AuthContext";
-import Sidebar from "../components/Sidebar";
 import EventBookingForm from "../components/EventBookingForm";
 
 const PENDING_STATUSES = ["Pending", "Pending QA Approval"];
@@ -94,7 +92,6 @@ const formatTime = (timeValue) => {
 export default function Events() {
   const { currentUser, userProfile } = useAuth();
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -379,38 +376,10 @@ export default function Events() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100">
-      <Sidebar
-        open={sidebarOpen}
-        setOpen={setSidebarOpen}
-      />
-
-      <div className="lg:ml-72">
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-4 border-b border-slate-200 bg-white px-4 shadow-sm lg:hidden">
-          <button
-            type="button"
-            onClick={() => setSidebarOpen(true)}
-            className="rounded-lg p-2 text-slate-600 transition hover:bg-slate-100"
-            aria-label="Open sidebar"
-          >
-            <Menu size={24} />
-          </button>
-
-          <div>
-            <p className="font-bold text-slate-900">
-              MIS Helpdesk
-            </p>
-            <p className="text-xs text-slate-500">
-              Event Booking
-            </p>
-          </div>
-        </header>
-
-        <main className="p-4 sm:p-6 lg:p-8">
-          <div className="space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h1 className="text-3xl font-bold text-slate-900">
+                <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
                   Event Booking
                 </h1>
                 <p className="mt-2 text-slate-500">
@@ -426,7 +395,7 @@ export default function Events() {
                     setShowForm(true);
                     setMessage({ type: "", text: "" });
                   }}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white transition hover:bg-blue-700 sm:w-auto"
                 >
                   <Plus size={19} />
                   Book Event
@@ -618,9 +587,6 @@ export default function Events() {
                 </div>
               )}
             </div>
-          </div>
-        </main>
-      </div>
 
       {showForm && canBookEvent && (
         <EventBookingForm

@@ -187,7 +187,7 @@ export default function Login() {
         </p>
       </section>
 
-      <section className="flex items-center justify-center px-6 py-12">
+      <section className="flex items-center justify-center px-3 py-8 sm:px-6 sm:py-12">
         <div className="w-full max-w-md">
           <div className="mb-7 lg:hidden">
             <div className="mb-4 inline-flex rounded-2xl bg-blue-600 p-3 text-white">
@@ -203,9 +203,9 @@ export default function Login() {
             </p>
           </div>
 
-          <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-xl shadow-slate-200/70">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70 sm:rounded-3xl sm:p-8">
             <div className="mb-8">
-              <h2 className="text-3xl font-bold text-slate-900">
+              <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
                 Welcome back
               </h2>
 

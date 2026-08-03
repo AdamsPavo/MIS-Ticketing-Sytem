@@ -306,7 +306,7 @@ export default function Dashboard() {
           MIS support dashboard
         </p>
 
-        <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+        <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
           Welcome back
         </h2>
 

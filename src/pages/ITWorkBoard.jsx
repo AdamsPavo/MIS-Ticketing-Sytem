@@ -5,6 +5,7 @@ import {
   onSnapshot,
   serverTimestamp,
   setDoc,
+  Timestamp,
 } from "firebase/firestore";
 import {
   BriefcaseBusiness,
@@ -112,6 +113,8 @@ const BLANK_FORM = {
   ticketNumber: "",
   estimatedFinish: "",
 };
+
+const LUNCH_BREAK_DURATION_MS = 60 * 60 * 1000;
 
 const formatDate = (value) => {
   if (!value) {
@@ -287,12 +290,10 @@ export default function ITWorkBoard() {
         .toLowerCase() === "in progress"
   );
 
-  // If there is no active In Progress ticket, automatically set the staff back to Available.
+  // Only clear a ticket-synchronized status. Manual statuses such as
+  // Lunch Break, In Meeting, and Training must remain selected.
   if (!inProgressTicket) {
-    const boardAlreadyAvailable =
-      myCurrentPost?.status === "Available";
-
-    if (boardAlreadyAvailable) {
+    if (myCurrentPost?.status !== "Working on a Ticket") {
       return;
     }
 
@@ -413,6 +414,79 @@ export default function ITWorkBoard() {
 ]);
 
   useEffect(() => {
+    if (
+      !isITStaff ||
+      !currentUser?.uid ||
+      myCurrentPost?.status !== "Lunch Break"
+    ) {
+      return undefined;
+    }
+
+    const lunchBreakEndsAt =
+      myCurrentPost.lunchBreakEndsAt?.toMillis?.() ||
+      (myCurrentPost.lunchBreakEndsAt
+        ? new Date(myCurrentPost.lunchBreakEndsAt).getTime()
+        : 0);
+
+    if (!lunchBreakEndsAt) {
+      return undefined;
+    }
+
+    const returnToAvailable = async () => {
+      try {
+        const staffName = getUserName(userProfile, currentUser);
+
+        await setDoc(
+          doc(db, "itWorkBoard", currentUser.uid),
+          {
+            status: "Available",
+            activity: "Ready to assist with IT concerns",
+            location: "MIS Office",
+            ticketNumber: "",
+            estimatedFinish: "",
+            lunchBreakStartedAt: null,
+            lunchBreakEndsAt: null,
+            updatedAt: serverTimestamp(),
+            updatedByUid: currentUser.uid,
+            updatedByName: staffName,
+            updatedAutomatically: true,
+          },
+          { merge: true }
+        );
+
+        setMessage(
+          "Your one-hour lunch break ended. Your status is now Available."
+        );
+      } catch (automaticUpdateError) {
+        console.error(
+          "Unable to end lunch break automatically:",
+          automaticUpdateError
+        );
+      }
+    };
+
+    const remainingTime = lunchBreakEndsAt - Date.now();
+
+    if (remainingTime <= 0) {
+      returnToAvailable();
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(
+      returnToAvailable,
+      remainingTime
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    currentUser,
+    isITStaff,
+    myCurrentPost?.lunchBreakEndsAt,
+    myCurrentPost?.status,
+    userProfile,
+  ]);
+
+  useEffect(() => {
     if (!myCurrentPost || showEditor) {
       return;
     }
@@ -531,6 +605,7 @@ export default function ITWorkBoard() {
         userProfile,
         currentUser
       );
+      const isLunchBreak = form.status === "Lunch Break";
 
       await setDoc(
         doc(db, "itWorkBoard", currentUser.uid),
@@ -559,6 +634,15 @@ export default function ITWorkBoard() {
 
           estimatedFinish:
             form.estimatedFinish.trim(),
+
+          lunchBreakStartedAt: isLunchBreak
+            ? serverTimestamp()
+            : null,
+          lunchBreakEndsAt: isLunchBreak
+            ? Timestamp.fromMillis(
+                Date.now() + LUNCH_BREAK_DURATION_MS
+              )
+            : null,
 
           createdAt:
             myCurrentPost?.createdAt ||
@@ -622,6 +706,8 @@ export default function ITWorkBoard() {
           location: "MIS Office",
           ticketNumber: "",
           estimatedFinish: "",
+          lunchBreakStartedAt: null,
+          lunchBreakEndsAt: null,
 
           createdAt:
             myCurrentPost?.createdAt ||
@@ -655,7 +741,7 @@ export default function ITWorkBoard() {
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 p-6 text-white shadow-lg md:p-8">
+      <section className="overflow-hidden rounded-2xl bg-gradient-to-r from-blue-700 via-blue-600 to-cyan-500 p-4 text-white shadow-lg sm:rounded-3xl sm:p-6 md:p-8">
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
           <div>
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-sm font-medium backdrop-blur-sm">
@@ -663,7 +749,7 @@ export default function ITWorkBoard() {
               Live MIS activity
             </div>
 
-            <h1 className="text-3xl font-bold md:text-4xl">
+            <h1 className="text-2xl font-bold sm:text-3xl md:text-4xl">
               IT Work Board
             </h1>
 
@@ -674,12 +760,12 @@ export default function ITWorkBoard() {
           </div>
 
           {isITStaff && (
-            <div className="flex flex-wrap gap-3">
+            <div className="grid gap-3 sm:flex sm:flex-wrap">
               <button
                 type="button"
                 onClick={handleSetAvailable}
                 disabled={saving}
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 font-semibold text-white shadow transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 font-semibold text-white shadow transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving ? (
                   <Loader2
@@ -697,7 +783,7 @@ export default function ITWorkBoard() {
                 type="button"
                 onClick={openEditor}
                 disabled={saving}
-                className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-3 font-semibold text-blue-700 shadow transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 font-semibold text-blue-700 shadow transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Edit3 size={18} />
 

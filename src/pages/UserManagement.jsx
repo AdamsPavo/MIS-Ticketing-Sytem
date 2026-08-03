@@ -299,7 +299,7 @@ export default function UserManagement() {
           System settings
         </p>
 
-        <h1 className="mt-2 text-3xl font-bold text-slate-900">
+        <h1 className="mt-2 text-2xl font-bold text-slate-900 sm:text-3xl">
           User Management
         </h1>
 
@@ -502,7 +502,7 @@ export default function UserManagement() {
         </section>
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-6 sm:py-5">
             <div>
               <h2 className="font-bold text-slate-900">
                 System Users
@@ -543,7 +543,7 @@ export default function UserManagement() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-180 text-left">
+              <table className="w-full min-w-[760px] text-left">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-6 py-4 font-semibold">
@@ -639,11 +639,11 @@ export default function UserManagement() {
                               </select>
                             </div>
 
-                            <div className="flex gap-2 md:col-span-2">
+                            <div className="flex flex-col gap-2 sm:flex-row md:col-span-2">
                               <button
                                 type="submit"
                                 disabled={savingUser}
-                                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300"
+                                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300"
                               >
                                 {savingUser ? (
                                   <LoaderCircle size={17} className="animate-spin" />
@@ -656,7 +656,7 @@ export default function UserManagement() {
                                 type="button"
                                 onClick={cancelEditing}
                                 disabled={savingUser}
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                               >
                                 <X size={17} />
                                 Cancel
