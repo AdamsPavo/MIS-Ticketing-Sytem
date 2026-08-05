@@ -1,13 +1,19 @@
 import { useEffect, useState } from "react";
 import {
   ArrowLeft,
+  Loader2,
+  Plus,
   Send,
   TicketPlus,
+  X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   addDoc,
   collection,
+  onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
 } from "firebase/firestore";
 
@@ -26,7 +32,7 @@ const categoryPriority = {
   Other: "Low",
 };
 
-const categories = Object.keys(categoryPriority);
+const defaultCategories = Object.keys(categoryPriority);
 
 const initialForm = {
   staffName: "",
@@ -42,6 +48,10 @@ export default function CreateTicket() {
 
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(false);
+  const [configuredCategories, setConfiguredCategories] = useState([]);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categorySaving, setCategorySaving] = useState(false);
   const [message, setMessage] = useState({
     type: "",
     text: "",
@@ -49,6 +59,33 @@ export default function CreateTicket() {
 
   const department =
     userProfile?.department?.trim() || "";
+
+  const categories = [
+    ...new Set([...defaultCategories, ...configuredCategories]),
+  ].sort((first, second) => first.localeCompare(second));
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, "concernCategories"),
+        orderBy("name", "asc")
+      ),
+      (snapshot) => {
+        setConfiguredCategories(
+          snapshot.docs
+            .map((document) => document.data())
+            .filter((category) => category.isActive !== false)
+            .map((category) => String(category.name || "").trim())
+            .filter(Boolean)
+        );
+      },
+      (error) => {
+        console.error("Unable to load concern categories:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (!message.text) {
@@ -77,7 +114,7 @@ export default function CreateTicket() {
       setForm((previous) => ({
         ...previous,
         category: value,
-        priority: categoryPriority[value] || "",
+        priority: categoryPriority[value] || "Low",
       }));
 
       return;
@@ -107,6 +144,69 @@ export default function CreateTicket() {
     );
 
     return `MIS-${year}${month}${day}-${randomNumber}`;
+  };
+
+  const addCategory = async (event) => {
+    event.preventDefault();
+
+    if (userProfile?.role !== "admin") {
+      setMessage({
+        type: "error",
+        text: "Only the administrator can add categories.",
+      });
+      return;
+    }
+
+    const categoryName = newCategoryName.trim();
+
+    if (!categoryName) return;
+
+    if (
+      categories.some(
+        (category) =>
+          category.toLowerCase() === categoryName.toLowerCase()
+      )
+    ) {
+      setMessage({
+        type: "error",
+        text: "This category already exists.",
+      });
+      return;
+    }
+
+    try {
+      setCategorySaving(true);
+
+      await addDoc(collection(db, "concernCategories"), {
+        name: categoryName,
+        description: "",
+        isActive: true,
+        createdBy: currentUser?.uid || "",
+        createdByEmail: currentUser?.email || "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      setForm((previous) => ({
+        ...previous,
+        category: categoryName,
+        priority: "Low",
+      }));
+      setNewCategoryName("");
+      setShowAddCategory(false);
+      setMessage({
+        type: "success",
+        text: `Category "${categoryName}" added and selected.`,
+      });
+    } catch (error) {
+      console.error("Unable to add category:", error);
+      setMessage({
+        type: "error",
+        text: error.message || "Unable to add the category.",
+      });
+    } finally {
+      setCategorySaving(false);
+    }
   };
 
   const handleSubmit = async (event) => {
@@ -368,12 +468,25 @@ export default function CreateTicket() {
           </div>
 
           <div>
-            <label
-              htmlFor="category"
-              className="mb-2 block text-sm font-semibold text-slate-700"
-            >
-              Category
-            </label>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label
+                htmlFor="category"
+                className="block text-sm font-semibold text-slate-700"
+              >
+                Category
+              </label>
+
+              {userProfile?.role === "admin" && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddCategory(true)}
+                  className="inline-flex items-center gap-1 text-sm font-semibold text-blue-600 hover:text-blue-700"
+                >
+                  <Plus size={16} />
+                  Add category
+                </button>
+              )}
+            </div>
 
             <select
               id="category"
@@ -503,6 +616,100 @@ export default function CreateTicket() {
           </div>
         </form>
       </div>
+
+      {showAddCategory && userProfile?.role === "admin" && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !categorySaving
+            ) {
+              setShowAddCategory(false);
+              setNewCategoryName("");
+            }
+          }}
+        >
+          <form
+            onSubmit={addCategory}
+            className="w-full max-w-md rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-start justify-between border-b border-slate-200 p-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Add Category
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  The new category will be selected automatically.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCategory(false);
+                  setNewCategoryName("");
+                }}
+                disabled={categorySaving}
+                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                aria-label="Close add category"
+              >
+                <X size={22} />
+              </button>
+            </div>
+
+            <div className="p-5">
+              <label
+                htmlFor="newCategoryName"
+                className="mb-2 block text-sm font-semibold text-slate-700"
+              >
+                Category Name
+              </label>
+              <input
+                id="newCategoryName"
+                value={newCategoryName}
+                onChange={(event) =>
+                  setNewCategoryName(event.target.value)
+                }
+                disabled={categorySaving}
+                maxLength={80}
+                autoFocus
+                required
+                placeholder="Example: Hardware"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+              />
+              <p className="mt-2 text-right text-xs text-slate-400">
+                {newCategoryName.length}/80
+              </p>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-200 p-5 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddCategory(false);
+                  setNewCategoryName("");
+                }}
+                disabled={categorySaving}
+                className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={categorySaving || !newCategoryName.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:bg-blue-300"
+              >
+                {categorySaving ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Plus size={18} />
+                )}
+                {categorySaving ? "Saving..." : "Add Category"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

@@ -46,17 +46,6 @@ const priorityOptions = [
   "Critical",
 ];
 
-const categoryOptions = [
-  "Hardware",
-  "Software",
-  "Network",
-  "Printer",
-  "Internet",
-  "Email",
-  "Account",
-  "Other",
-];
-
 const statusStyles = {
   Pending: "border-amber-200 bg-amber-50 text-amber-700",
   Assigned: "border-blue-200 bg-blue-50 text-blue-700",
@@ -107,6 +96,7 @@ export default function AllTickets() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
+  const [configuredCategories, setConfiguredCategories] = useState([]);
 
   const [remarks, setRemarks] = useState("");
   const [releaseReason, setReleaseReason] = useState("");
@@ -120,6 +110,45 @@ export default function AllTickets() {
     type: "",
     text: "",
   });
+
+  useEffect(() => {
+    const categoriesQuery = query(
+      collection(db, "concernCategories"),
+      orderBy("name", "asc")
+    );
+
+    const unsubscribe = onSnapshot(
+      categoriesQuery,
+      (snapshot) => {
+        const categoryList = snapshot.docs
+          .map((categoryDoc) => ({
+            id: categoryDoc.id,
+            ...categoryDoc.data(),
+          }))
+          .filter((category) => category.isActive !== false)
+          .map((category) => String(category.name || "").trim())
+          .filter(Boolean);
+
+        setConfiguredCategories(categoryList);
+      },
+      (error) => {
+        console.error("Unable to load concern categories:", error);
+
+        setMessage((currentMessage) =>
+          currentMessage.text
+            ? currentMessage
+            : {
+                type: "error",
+                text:
+                  error.message ||
+                  "Unable to load concern categories from Firestore.",
+              }
+        );
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     const ticketsQuery = query(
@@ -176,6 +205,26 @@ export default function AllTickets() {
     setReleaseReason("");
     setSelectedStatus(selectedTicket.status || "Pending");
   }, [selectedTicket]);
+
+  const categoryOptions = useMemo(() => {
+    const ticketCategories = tickets
+      .map((ticketItem) => String(ticketItem.category || "").trim())
+      .filter(Boolean);
+
+    return [...new Set([...configuredCategories, ...ticketCategories])].sort(
+      (firstCategory, secondCategory) =>
+        firstCategory.localeCompare(secondCategory)
+    );
+  }, [configuredCategories, tickets]);
+
+  useEffect(() => {
+    if (
+      categoryFilter !== "All" &&
+      !categoryOptions.includes(categoryFilter)
+    ) {
+      setCategoryFilter("All");
+    }
+  }, [categoryFilter, categoryOptions]);
 
   const filteredTickets = useMemo(() => {
     const searchValue = search.toLowerCase().trim();
@@ -659,19 +708,21 @@ export default function AllTickets() {
         </div>
 
         {userProfile?.role === "admin" && (
-          <button
-            type="button"
-            onClick={deleteAllTickets}
-            disabled={saving || tickets.length === 0}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
-          >
-            {saving ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Trash2 size={18} />
-            )}
-            Delete All Tickets
-          </button>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={deleteAllTickets}
+              disabled={saving || tickets.length === 0}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
+            >
+              {saving ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Trash2 size={18} />
+              )}
+              Delete All Tickets
+            </button>
+          </div>
         )}
       </div>
 

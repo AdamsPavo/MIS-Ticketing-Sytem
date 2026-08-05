@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Tickets,
   Users,
+  BriefcaseBusiness,
 } from "lucide-react";
 import {
   collection,
@@ -69,13 +70,6 @@ const EVENT_STATUS_COLORS = {
   Cancelled: "#64748b",
 };
 
-const PRIORITY_COLORS = {
-  Low: "#22c55e",
-  Medium: "#3b82f6",
-  High: "#f97316",
-  Urgent: "#ef4444",
-  "Not Set": "#94a3b8",
-};
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -100,7 +94,7 @@ function normalizePriority(value) {
   if (priority === "low") return "Low";
   if (priority === "medium") return "Medium";
   if (priority === "high") return "High";
-  if (priority === "urgent") return "Urgent";
+  if (priority === "urgent" || priority === "critical") return "Critical";
 
   return normalizeText(value) || "Not Set";
 }
@@ -156,6 +150,8 @@ function formatDuration(hours) {
 
   return `${(hours / 24).toFixed(1)} days`;
 }
+
+
 
 
 function normalizeEventStatus(value) {
@@ -281,9 +277,12 @@ function getResolvedDate(ticket) {
 export default function Reports() {
   const [tickets, setTickets] = useState([]);
   const [events, setEvents] = useState([]);
+  const [workLogs, setWorkLogs] = useState([]);
   const [ticketsLoading, setTicketsLoading] = useState(true);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const loading = ticketsLoading || eventsLoading;
+  const [workLogsLoading, setWorkLogsLoading] = useState(true);
+  const loading =
+    ticketsLoading || eventsLoading || workLogsLoading;
   const [loadError, setLoadError] = useState("");
 
   const [dateRange, setDateRange] = useState("30");
@@ -359,16 +358,47 @@ export default function Reports() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const workLogsQuery = query(
+      collection(db, "itWorkLogs"),
+      orderBy("startedAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(
+      workLogsQuery,
+      (snapshot) => {
+        setWorkLogs(
+          snapshot.docs.map((document) => ({
+            id: document.id,
+            ...document.data(),
+          }))
+        );
+        setWorkLogsLoading(false);
+      },
+      (error) => {
+        console.error("Unable to load IT work activity logs:", error);
+        setWorkLogsLoading(false);
+        setLoadError(
+          error.message ||
+            "Unable to load saved IT work activities."
+        );
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   const departments = useMemo(() => {
     return [
       ...new Set([
         ...tickets.map(getDepartment),
         ...events.map((eventItem) => eventItem.department || "Unspecified"),
+        ...workLogs.map((workLog) => workLog.department || "MIS"),
       ]),
     ]
       .filter(Boolean)
       .sort();
-  }, [tickets, events]);
+  }, [tickets, events, workLogs]);
 
   const categories = useMemo(() => {
     return [
@@ -380,13 +410,24 @@ export default function Reports() {
 
   const staffMembers = useMemo(() => {
     return [
-      ...new Set(tickets.map(getAssignedStaff)),
+      ...new Set([
+        ...tickets.map(getAssignedStaff),
+        ...workLogs.map(
+          (workLog) =>
+            workLog.staffName ||
+            workLog.email ||
+            "Unknown IT Staff"
+        ),
+      ]),
     ]
       .filter(
-        (staff) => staff && staff !== "Unassigned"
+        (staff) =>
+          staff &&
+          staff !== "Unassigned" &&
+          staff !== "Unknown IT Staff"
       )
       .sort();
-  }, [tickets]);
+  }, [tickets, workLogs]);
 
   const filteredTickets = useMemo(() => {
     const selectedDays = Number(dateRange);
@@ -473,6 +514,46 @@ export default function Reports() {
     });
   }, [events, dateRange, departmentFilter]);
 
+  const filteredWorkLogs = useMemo(() => {
+    const selectedDays = Number(dateRange);
+    const startDate = new Date();
+
+    if (selectedDays > 0) {
+      startDate.setHours(0, 0, 0, 0);
+      startDate.setDate(startDate.getDate() - selectedDays);
+    }
+
+    return workLogs.filter((workLog) => {
+      const startedAt = getDateValue(workLog.startedAt);
+      const department = workLog.department || "MIS";
+      const staff =
+        workLog.staffName ||
+        workLog.email ||
+        "Unknown IT Staff";
+
+      const matchesDate =
+        selectedDays === 0 ||
+        !startedAt ||
+        startedAt >= startDate;
+
+      const matchesDepartment =
+        departmentFilter === "all" ||
+        department === departmentFilter;
+
+      const matchesStaff =
+        staffFilter === "all" ||
+        staff === staffFilter;
+
+      return matchesDate && matchesDepartment && matchesStaff;
+    });
+  }, [
+    workLogs,
+    dateRange,
+    departmentFilter,
+    staffFilter,
+  ]);
+
+
   const eventAnalytics = useMemo(() => {
     const statusCounts = Object.fromEntries(
       EVENT_STATUS_ORDER.map((status) => [status, 0])
@@ -551,7 +632,6 @@ export default function Reports() {
 
     const departmentCounts = {};
     const categoryCounts = {};
-    const priorityCounts = {};
     const staffCounts = {};
     const dailyTrend = {};
     const departmentPerformance = {};
@@ -576,9 +656,6 @@ export default function Reports() {
 
       categoryCounts[category] =
         (categoryCounts[category] || 0) + 1;
-
-      priorityCounts[priority] =
-        (priorityCounts[priority] || 0) + 1;
 
       if (!departmentPerformance[department]) {
         departmentPerformance[department] = {
@@ -623,10 +700,19 @@ export default function Reports() {
             inProgress: 0,
             resolved: 0,
             closed: 0,
+            priorities: {
+              Low: 0,
+              Medium: 0,
+              High: 0,
+              Critical: 0,
+              "Not Set": 0,
+            },
           };
         }
 
         staffCounts[staff].assigned += 1;
+        staffCounts[staff].priorities[priority] =
+          (staffCounts[staff].priorities[priority] || 0) + 1;
 
         if (status === "Pending") {
           staffCounts[staff].pending += 1;
@@ -732,15 +818,6 @@ export default function Reports() {
       }))
       .sort((a, b) => b.value - a.value);
 
-    const priorityData = Object.entries(
-      priorityCounts
-    )
-      .map(([name, value]) => ({
-        name,
-        value,
-      }))
-      .sort((a, b) => b.value - a.value);
-
     const trendData = Object.values(dailyTrend)
       .sort(
         (a, b) =>
@@ -757,10 +834,25 @@ export default function Reports() {
         const completedTickets =
           values.resolved + values.closed;
 
+        const priorityEntries = Object.entries(values.priorities);
+        const highestPriorityCount = Math.max(
+          0,
+          ...priorityEntries.map(([, count]) => count)
+        );
+
+        const mostHandledPriority =
+          highestPriorityCount > 0
+            ? priorityEntries
+                .filter(([, count]) => count === highestPriorityCount)
+                .map(([priorityName]) => priorityName)
+                .join(" / ")
+            : "No data";
+
         return {
           name,
           ...values,
           completed: completedTickets,
+          mostHandledPriority,
           resolutionRate:
             values.assigned > 0
               ? Math.round(
@@ -814,7 +906,6 @@ export default function Reports() {
       statusData,
       departmentData,
       categoryData,
-      priorityData,
       trendData,
       staffData,
       departmentReportData,
@@ -833,7 +924,11 @@ export default function Reports() {
   };
 
   const exportToCsv = () => {
-    if (filteredTickets.length === 0 && filteredEvents.length === 0) {
+    if (
+      filteredTickets.length === 0 &&
+      filteredEvents.length === 0 &&
+      filteredWorkLogs.length === 0
+    ) {
       return;
     }
 
@@ -868,7 +963,28 @@ export default function Reports() {
       "Completed Date": formatDate(eventItem.completedAt, true),
     }));
 
-    const rows = [...ticketRows, ...eventRows];
+    const workActivityRows = filteredWorkLogs.map((workLog) => ({
+      "Record Type": "IT Work Activity",
+      "Reference Number": workLog.id,
+      Title: workLog.activity || workLog.status || "IT activity",
+      Department: workLog.department || "MIS",
+      Category: workLog.status || "Other Activity",
+      Priority: "",
+      Status: workLog.endedAt ? "Completed" : "Ongoing",
+      "Assigned Staff / Requester":
+        workLog.staffName ||
+        workLog.email ||
+        "Unknown IT Staff",
+      "Venue / Schedule": workLog.location || "",
+      "Created Date": formatDate(workLog.startedAt, true),
+      "Completed Date": "",
+    }));
+
+    const rows = [
+      ...ticketRows,
+      ...eventRows,
+      ...workActivityRows,
+    ];
     const headers = Object.keys(rows[0]);
 
     const csvContent = [
@@ -974,7 +1090,11 @@ export default function Reports() {
           <button
             type="button"
             onClick={exportToCsv}
-            disabled={filteredTickets.length === 0 && filteredEvents.length === 0}
+            disabled={
+              filteredTickets.length === 0 &&
+              filteredEvents.length === 0 &&
+              filteredWorkLogs.length === 0
+            }
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           >
             <Download size={17} />
@@ -1083,8 +1203,8 @@ export default function Reports() {
               label: "High",
             },
             {
-              value: "Urgent",
-              label: "Urgent",
+              value: "Critical",
+              label: "Critical",
             },
             {
               value: "Not Set",
@@ -1611,103 +1731,33 @@ export default function Reports() {
             </ChartCard>
           </section>
 
-          {/* Priority and IT staff */}
-          <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_1.5fr]">
-            <ChartCard
-              title="Priority distribution"
-              description="Tickets grouped according to priority"
-            >
-              {analytics.priorityData.length === 0 ? (
-                <EmptyChart />
-              ) : (
-                <>
-                  <ResponsiveContainer
-                    width="100%"
-                    height={230}
-                  >
-                    <PieChart>
-                      <Pie
-                        data={analytics.priorityData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius={50}
-                        outerRadius={88}
-                        paddingAngle={3}
-                      >
-                        {analytics.priorityData.map(
-                          (entry) => (
-                            <Cell
-                              key={entry.name}
-                              fill={
-                                PRIORITY_COLORS[
-                                  entry.name
-                                ] || "#94a3b8"
-                              }
-                            />
-                          )
-                        )}
-                      </Pie>
-
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-
-                  <div className="space-y-2">
-                    {analytics.priorityData.map(
-                      (entry) => (
-                        <div
-                          key={entry.name}
-                          className="flex items-center justify-between text-sm"
-                        >
-                          <span className="flex items-center gap-2 text-slate-600">
-                            <span
-                              className="h-2.5 w-2.5 rounded-full"
-                              style={{
-                                backgroundColor:
-                                  PRIORITY_COLORS[
-                                    entry.name
-                                  ] || "#94a3b8",
-                              }}
-                            />
-
-                            {entry.name}
-                          </span>
-
-                          <span className="font-semibold text-slate-900">
-                            {entry.value}
-                          </span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </>
-              )}
-            </ChartCard>
-
+          {/* IT staff performance */}
+          <section className="mt-6">
             <TableCard
               title="IT staff performance"
-              description="Assigned workload and completed tickets"
+              description="Assigned workload, completion, and ticket priorities handled by each IT staff member"
               icon={Users}
             >
-              <table className="min-w-full">
+              <table className="min-w-[1150px] w-full">
                 <thead className="bg-slate-50">
                   <tr>
                     <TableHeader>IT Staff</TableHeader>
                     <TableHeader>Assigned</TableHeader>
-                    <TableHeader>
-                      In Progress
-                    </TableHeader>
+                    <TableHeader>In Progress</TableHeader>
                     <TableHeader>Completed</TableHeader>
-                    <TableHeader>
-                      Resolution Rate
-                    </TableHeader>
+                    <TableHeader>Low</TableHeader>
+                    <TableHeader>Medium</TableHeader>
+                    <TableHeader>High</TableHeader>
+                    <TableHeader>Critical</TableHeader>
+                    <TableHeader>Most Handled Priority</TableHeader>
+                    <TableHeader>Resolution Rate</TableHeader>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-slate-100">
                   {analytics.staffData.length === 0 ? (
                     <EmptyTable
-                      colSpan={5}
+                      colSpan={10}
                       message="No IT staff performance data available."
                     />
                   ) : (
@@ -1722,22 +1772,101 @@ export default function Reports() {
                           </span>
                         </TableCell>
 
-                        <TableCell>
-                          {staff.assigned}
-                        </TableCell>
+                        <TableCell>{staff.assigned}</TableCell>
+                        <TableCell>{staff.inProgress}</TableCell>
+                        <TableCell>{staff.completed}</TableCell>
+                        <TableCell>{staff.priorities.Low || 0}</TableCell>
+                        <TableCell>{staff.priorities.Medium || 0}</TableCell>
+                        <TableCell>{staff.priorities.High || 0}</TableCell>
+                        <TableCell>{staff.priorities.Critical || 0}</TableCell>
 
                         <TableCell>
-                          {staff.inProgress}
-                        </TableCell>
-
-                        <TableCell>
-                          {staff.completed}
+                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                            {staff.mostHandledPriority}
+                          </span>
                         </TableCell>
 
                         <TableCell>
                           <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
                             {staff.resolutionRate}%
                           </span>
+                        </TableCell>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </TableCard>
+          </section>
+
+          {/* IT work activities */}
+          <section className="mt-6">
+            <TableCard
+              title="IT work activities"
+              description={`${filteredWorkLogs.length} recorded non-ticket IT work activity or activities`}
+              icon={BriefcaseBusiness}
+              iconClass="bg-violet-50 text-violet-600"
+            >
+              <div className="border-b border-slate-100 p-5">
+                <div className="w-full rounded-xl bg-violet-50 p-4 sm:max-w-xs">
+                  <p className="text-sm font-medium text-violet-700">
+                    Recorded Activities
+                  </p>
+                  <p className="mt-2 text-2xl font-bold text-violet-900">
+                    {filteredWorkLogs.length}
+                  </p>
+                </div>
+              </div>
+
+              <table className="min-w-[900px] w-full">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <TableHeader>IT Staff</TableHeader>
+                    <TableHeader>Activity Type</TableHeader>
+                    <TableHeader>Description</TableHeader>
+                    <TableHeader>Location</TableHeader>
+                    <TableHeader>Time Started</TableHeader>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {filteredWorkLogs.length === 0 ? (
+                    <EmptyTable
+                      colSpan={5}
+                      message="No saved IT work activities match the selected filters."
+                    />
+                  ) : (
+                    filteredWorkLogs.map((workLog) => (
+                      <tr
+                        key={workLog.id}
+                        className="hover:bg-slate-50"
+                      >
+                        <TableCell>
+                          <span className="font-semibold text-slate-800">
+                            {workLog.staffName ||
+                              workLog.email ||
+                              "Unknown IT Staff"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell>
+                          <span className="rounded-full bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-700">
+                            {workLog.status || "Other Activity"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell>
+                          <span className="block max-w-xs whitespace-pre-wrap">
+                            {workLog.activity || "No description"}
+                          </span>
+                        </TableCell>
+
+                        <TableCell>
+                          {workLog.location || "Not specified"}
+                        </TableCell>
+
+                        <TableCell>
+                          {formatDate(workLog.startedAt, true)}
                         </TableCell>
                       </tr>
                     ))

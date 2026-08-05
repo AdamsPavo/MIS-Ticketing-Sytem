@@ -3,9 +3,11 @@ import {
   collection,
   doc,
   onSnapshot,
-  serverTimestamp,
-  setDoc,
   Timestamp,
+  runTransaction,
+  query,
+  orderBy,
+  limit,
 } from "firebase/firestore";
 import {
   BriefcaseBusiness,
@@ -116,6 +118,16 @@ const BLANK_FORM = {
 
 const LUNCH_BREAK_DURATION_MS = 60 * 60 * 1000;
 
+const NON_REPORTABLE_STATUSES = new Set([
+  "Available",
+  "Working on a Ticket",
+  "Lunch Break",
+  "Out of Office",
+]);
+
+const shouldRecordWorkLog = (status) =>
+  Boolean(status) && !NON_REPORTABLE_STATUSES.has(status);
+
 const formatDate = (value) => {
   if (!value) {
     return "Not available";
@@ -167,6 +179,8 @@ export default function ITWorkBoard() {
 
   const [workPosts, setWorkPosts] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [recentActivities, setRecentActivities] = useState([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(true);
 
   const [form, setForm] = useState(BLANK_FORM);
 
@@ -179,6 +193,78 @@ export default function ITWorkBoard() {
   const [error, setError] = useState("");
 
   const isITStaff = userProfile?.role === "IT_STAFF";
+  const isAdmin =
+    userProfile?.role === "admin" ||
+    userProfile?.role === "ADMIN";
+  const canViewRecentActivities = isITStaff || isAdmin;
+
+  const saveBoardStatusWithWorkLog = async ({ boardData, automatic = false }) => {
+    if (!currentUser?.uid) throw new Error("Your account information could not be found.");
+
+    const staffName = getUserName(userProfile, currentUser);
+    const now = Timestamp.now();
+    const boardReference = doc(db, "itWorkBoard", currentUser.uid);
+    const reportable = shouldRecordWorkLog(boardData.status);
+    const newLogReference = reportable ? doc(collection(db, "itWorkLogs")) : null;
+
+    await runTransaction(db, async (transaction) => {
+      const boardSnapshot = await transaction.get(boardReference);
+      const previousBoard = boardSnapshot.exists() ? boardSnapshot.data() : null;
+      const previousLogId = previousBoard?.activeWorkLogId || "";
+
+      if (previousLogId) {
+        const previousLogReference = doc(db, "itWorkLogs", previousLogId);
+        const previousLogSnapshot = await transaction.get(previousLogReference);
+        if (previousLogSnapshot.exists()) {
+          const previousLog = previousLogSnapshot.data();
+          const startedAtMillis = previousLog.startedAt?.toMillis?.() || now.toMillis();
+          const durationMs = Math.max(0, now.toMillis() - startedAtMillis);
+          transaction.update(previousLogReference, {
+            endedAt: now,
+            durationMs,
+            durationMinutes: Math.round(durationMs / 60000),
+            updatedAt: now,
+          });
+        }
+      }
+
+      if (newLogReference) {
+        transaction.set(newLogReference, {
+          staffId: currentUser.uid,
+          staffName,
+          email: currentUser.email || "",
+          department: userProfile?.department || "MIS",
+          status: boardData.status,
+          activity: boardData.activity || "",
+          location: boardData.location || "",
+          estimatedFinish: boardData.estimatedFinish || "",
+          startedAt: now,
+          endedAt: null,
+          durationMs: 0,
+          durationMinutes: 0,
+          source: automatic ? "automatic" : "manual",
+          isProductive: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
+      transaction.set(boardReference, {
+        uid: currentUser.uid,
+        fullName: staffName,
+        email: currentUser.email || "",
+        department: userProfile?.department || "MIS",
+        ...boardData,
+        activeWorkLogId: newLogReference?.id || "",
+        activeWorkLogStartedAt: newLogReference ? now : null,
+        createdAt: previousBoard?.createdAt || boardData.createdAt || now,
+        updatedAt: now,
+        updatedByUid: currentUser.uid,
+        updatedByName: staffName,
+        updatedAutomatically: automatic,
+      }, { merge: true });
+    });
+  };
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
@@ -219,6 +305,45 @@ export default function ITWorkBoard() {
 
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (!canViewRecentActivities) {
+      setRecentActivities([]);
+      setActivitiesLoading(false);
+      return undefined;
+    }
+
+    setActivitiesLoading(true);
+
+    const recentActivityQuery = query(
+      collection(db, "itWorkLogs"),
+      orderBy("startedAt", "desc"),
+      limit(20)
+    );
+
+    const unsubscribe = onSnapshot(
+      recentActivityQuery,
+      (snapshot) => {
+        setRecentActivities(
+          snapshot.docs.map((activityDocument) => ({
+            id: activityDocument.id,
+            ...activityDocument.data(),
+          }))
+        );
+        setActivitiesLoading(false);
+      },
+      (snapshotError) => {
+        console.error(
+          "Unable to load recent IT activities:",
+          snapshotError
+        );
+        setRecentActivities([]);
+        setActivitiesLoading(false);
+      }
+    );
+
+    return unsubscribe;
+  }, [canViewRecentActivities]);
 
   useEffect(() => {
     if (!isITStaff || !currentUser?.uid) {
@@ -299,28 +424,18 @@ export default function ITWorkBoard() {
 
     const setAvailableAutomatically = async () => {
       try {
-        const staffName = getUserName(userProfile, currentUser);
-
-        await setDoc(
-          doc(db, "itWorkBoard", currentUser.uid),
-          {
-            uid: currentUser.uid,
-            fullName: staffName,
-            email: currentUser.email || "",
-            department: userProfile?.department || "MIS",
+        await saveBoardStatusWithWorkLog({
+          automatic: true,
+          boardData: {
             status: "Available",
             activity: "Ready to assist with IT concerns",
             location: "MIS Office",
             ticketNumber: "",
             estimatedFinish: "",
-            createdAt: myCurrentPost?.createdAt || serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            updatedByUid: currentUser.uid,
-            updatedByName: staffName,
-            updatedAutomatically: true,
+            lunchBreakStartedAt: null,
+            lunchBreakEndsAt: null,
           },
-          { merge: true }
-        );
+        });
       } catch (error) {
         console.error("Unable to automatically set Available:", error);
       }
@@ -360,40 +475,18 @@ export default function ITWorkBoard() {
 
   const updateWorkBoardAutomatically = async () => {
     try {
-      const staffName = getUserName(
-        userProfile,
-        currentUser
-      );
-
-      await setDoc(
-        doc(db, "itWorkBoard", currentUser.uid),
-        {
-          uid: currentUser.uid,
-          fullName: staffName,
-          email: currentUser.email || "",
-          department:
-            userProfile?.department || "MIS",
-
+      await saveBoardStatusWithWorkLog({
+        automatic: true,
+        boardData: {
           status: "Working on a Ticket",
           activity: `Working on: ${ticketSubject}`,
           location: ticketLocation,
           ticketNumber,
-          estimatedFinish:
-            myCurrentPost?.estimatedFinish || "",
-
-          createdAt:
-            myCurrentPost?.createdAt ||
-            serverTimestamp(),
-
-          updatedAt: serverTimestamp(),
-          updatedByUid: currentUser.uid,
-          updatedByName: staffName,
-          updatedAutomatically: true,
+          estimatedFinish: myCurrentPost?.estimatedFinish || "",
+          lunchBreakStartedAt: null,
+          lunchBreakEndsAt: null,
         },
-        {
-          merge: true,
-        }
-      );
+      });
     } catch (automaticUpdateError) {
       console.error(
         "Unable to automatically update IT Work Board:",
@@ -434,11 +527,9 @@ export default function ITWorkBoard() {
 
     const returnToAvailable = async () => {
       try {
-        const staffName = getUserName(userProfile, currentUser);
-
-        await setDoc(
-          doc(db, "itWorkBoard", currentUser.uid),
-          {
+        await saveBoardStatusWithWorkLog({
+          automatic: true,
+          boardData: {
             status: "Available",
             activity: "Ready to assist with IT concerns",
             location: "MIS Office",
@@ -446,17 +537,8 @@ export default function ITWorkBoard() {
             estimatedFinish: "",
             lunchBreakStartedAt: null,
             lunchBreakEndsAt: null,
-            updatedAt: serverTimestamp(),
-            updatedByUid: currentUser.uid,
-            updatedByName: staffName,
-            updatedAutomatically: true,
           },
-          { merge: true }
-        );
-
-        setMessage(
-          "Your one-hour lunch break ended. Your status is now Available."
-        );
+        });
       } catch (automaticUpdateError) {
         console.error(
           "Unable to end lunch break automatically:",
@@ -601,61 +683,26 @@ export default function ITWorkBoard() {
       setError("");
       setMessage("");
 
-      const staffName = getUserName(
-        userProfile,
-        currentUser
-      );
       const isLunchBreak = form.status === "Lunch Break";
 
-      await setDoc(
-        doc(db, "itWorkBoard", currentUser.uid),
-        {
-          uid: currentUser.uid,
-          fullName: staffName,
-          email: currentUser.email || "",
-
-          department:
-            userProfile?.department || "MIS",
-
+      await saveBoardStatusWithWorkLog({
+        automatic: false,
+        boardData: {
           status: form.status,
-
-          activity:
-            form.status === "Available"
-              ? form.activity.trim() ||
-                "Ready to assist with IT concerns"
-              : form.activity.trim(),
-
+          activity: form.status === "Available"
+            ? form.activity.trim() || "Ready to assist with IT concerns"
+            : form.activity.trim(),
           location: form.location.trim(),
-
-          ticketNumber:
-            form.status === "Working on a Ticket"
-              ? form.ticketNumber.trim()
-              : "",
-
-          estimatedFinish:
-            form.estimatedFinish.trim(),
-
-          lunchBreakStartedAt: isLunchBreak
-            ? serverTimestamp()
-            : null,
+          ticketNumber: form.status === "Working on a Ticket"
+            ? form.ticketNumber.trim()
+            : "",
+          estimatedFinish: form.estimatedFinish.trim(),
+          lunchBreakStartedAt: isLunchBreak ? Timestamp.now() : null,
           lunchBreakEndsAt: isLunchBreak
-            ? Timestamp.fromMillis(
-                Date.now() + LUNCH_BREAK_DURATION_MS
-              )
+            ? Timestamp.fromMillis(Date.now() + LUNCH_BREAK_DURATION_MS)
             : null,
-
-          createdAt:
-            myCurrentPost?.createdAt ||
-            serverTimestamp(),
-
-          updatedAt: serverTimestamp(),
-          updatedByUid: currentUser.uid,
-          updatedByName: staffName,
         },
-        {
-          merge: true,
-        }
-      );
+      });
 
       setMessage(
         "Your current activity has been posted successfully."
@@ -685,22 +732,9 @@ export default function ITWorkBoard() {
       setSaving(true);
       setError("");
       setMessage("");
-
-      const staffName = getUserName(
-        userProfile,
-        currentUser
-      );
-
-      await setDoc(
-        doc(db, "itWorkBoard", currentUser.uid),
-        {
-          uid: currentUser.uid,
-          fullName: staffName,
-          email: currentUser.email || "",
-
-          department:
-            userProfile?.department || "MIS",
-
+      await saveBoardStatusWithWorkLog({
+        automatic: false,
+        boardData: {
           status: "Available",
           activity: "Ready to assist with IT concerns",
           location: "MIS Office",
@@ -708,19 +742,8 @@ export default function ITWorkBoard() {
           estimatedFinish: "",
           lunchBreakStartedAt: null,
           lunchBreakEndsAt: null,
-
-          createdAt:
-            myCurrentPost?.createdAt ||
-            serverTimestamp(),
-
-          updatedAt: serverTimestamp(),
-          updatedByUid: currentUser.uid,
-          updatedByName: staffName,
         },
-        {
-          merge: true,
-        }
-      );
+      });
 
       setMessage(
         "Your status is now set to Available."
@@ -860,6 +883,88 @@ export default function ITWorkBoard() {
               onEdit={openEditor}
             />
           ))}
+        </section>
+      )}
+
+      {canViewRecentActivities && (
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+            <h2 className="text-lg font-bold text-slate-900">
+              Recent Saved Activities
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              The 20 most recent non-ticket work activities recorded by IT staff, showing when each activity started.
+            </p>
+          </div>
+
+          {activitiesLoading ? (
+            <div className="flex min-h-48 items-center justify-center">
+              <Loader2
+                size={24}
+                className="animate-spin text-blue-600"
+              />
+              <span className="ml-3 text-sm text-slate-500">
+                Loading recent activities...
+              </span>
+            </div>
+          ) : recentActivities.length === 0 ? (
+            <div className="px-6 py-12 text-center text-sm text-slate-500">
+              No saved IT activities found.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px]">
+                <thead className="bg-slate-50">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-5 py-4">IT Staff</th>
+                    <th className="px-5 py-4">Activity Type</th>
+                    <th className="px-5 py-4">Description</th>
+                    <th className="px-5 py-4">Location</th>
+                    <th className="px-5 py-4">Time Started</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-slate-100">
+                  {recentActivities.map((activityItem) => (
+                    <tr
+                      key={activityItem.id}
+                      className="hover:bg-slate-50"
+                    >
+                      <td className="px-5 py-4">
+                        <p className="font-semibold text-slate-800">
+                          {activityItem.staffName || "IT Staff"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {activityItem.department || "MIS"}
+                        </p>
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                          {activityItem.status || "Activity"}
+                        </span>
+                      </td>
+
+                      <td className="max-w-xs px-5 py-4 text-sm text-slate-700">
+                        <p className="line-clamp-2">
+                          {activityItem.activity || "No description"}
+                        </p>
+                      </td>
+
+                      <td className="px-5 py-4 text-sm text-slate-600">
+                        {activityItem.location || "Not specified"}
+                      </td>
+
+                      <td className="px-5 py-4 text-sm text-slate-600">
+                        {formatDate(activityItem.startedAt)}
+                      </td>
+
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       )}
 
