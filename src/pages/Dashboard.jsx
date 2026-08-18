@@ -251,35 +251,74 @@ export default function Dashboard() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const getEventDate = (eventItem) => {
+      const value = eventItem?.eventDate;
+
+      if (!value) return null;
+
+      if (typeof value?.toDate === "function") {
+        const date = value.toDate();
+        date.setHours(0, 0, 0, 0);
+        return date;
+      }
+
+      const stringValue = String(value).trim();
+
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(stringValue)
+        ? new Date(`${stringValue}T00:00:00`)
+        : new Date(stringValue);
+
+      if (Number.isNaN(date.getTime())) {
+        return null;
+      }
+
+      date.setHours(0, 0, 0, 0);
+      return date;
+    };
+
+    const getEventDateTime = (eventItem) => {
+      const eventDate = getEventDate(eventItem);
+
+      if (!eventDate) return Number.MAX_SAFE_INTEGER;
+
+      const year = eventDate.getFullYear();
+      const month = String(eventDate.getMonth() + 1).padStart(2, "0");
+      const day = String(eventDate.getDate()).padStart(2, "0");
+      const time = eventItem?.startTime || "00:00";
+
+      const dateTime = new Date(
+        `${year}-${month}-${day}T${time}:00`
+      );
+
+      return Number.isNaN(dateTime.getTime())
+        ? eventDate.getTime()
+        : dateTime.getTime();
+    };
+
     return events
       .filter((eventItem) => {
-        const eventDate = eventItem.eventDate
-          ? new Date(`${eventItem.eventDate}T00:00:00`)
-          : null;
-
-        const normalizedEventStatus = normalizeStatus(eventItem.status);
-
-        return (
-          eventDate &&
-          !Number.isNaN(eventDate.getTime()) &&
-          eventDate >= today &&
-          normalizedEventStatus !== "rejected" &&
-          normalizedEventStatus !== "cancelled" &&
-          normalizedEventStatus !== "completed"
+        const normalizedEventStatus = normalizeStatus(
+          eventItem.status
         );
-      })
-      .sort((firstEvent, secondEvent) => {
-        const firstDateTime = new Date(
-          `${firstEvent.eventDate}T${firstEvent.startTime || "00:00"}:00`
-        ).getTime();
 
-        const secondDateTime = new Date(
-          `${secondEvent.eventDate}T${secondEvent.startTime || "00:00"}:00`
-        ).getTime();
+        if (normalizedEventStatus !== "confirmed") {
+          return false;
+        }
 
-        return firstDateTime - secondDateTime;
+        const eventDate = getEventDate(eventItem);
+
+        if (!eventDate) {
+          return false;
+        }
+
+        return eventDate >= today;
       })
-      .slice(0, 5);
+      .sort(
+        (firstEvent, secondEvent) =>
+          getEventDateTime(firstEvent) -
+          getEventDateTime(secondEvent)
+      )
+      .slice(0, 10);
   }, [events]);
 
   const openTicket = (ticket) => {
@@ -575,7 +614,7 @@ export default function Dashboard() {
               </h3>
 
               <p className="mt-1 text-sm text-slate-500">
-                Confirmed and pending event bookings scheduled from today onward
+                Confirmed events scheduled for today and upcoming dates
               </p>
             </div>
 
@@ -613,71 +652,73 @@ export default function Dashboard() {
               </h4>
 
               <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
-                Future event bookings will appear here after they are submitted.
+                Confirmed events scheduled for today or a future date will appear here automatically.
               </p>
             </div>
           ) : (
-            <div className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-3">
-              {upcomingEvents.map((eventItem) => (
-                <button
-                  key={eventItem.id}
-                  type="button"
-                  onClick={() =>
-                    navigate("/events", {
-                      state: {
-                        selectedEventId: eventItem.id,
-                      },
-                    })
-                  }
-                  className="rounded-2xl border border-slate-200 p-5 text-left transition hover:border-blue-300 hover:bg-blue-50/40 hover:shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                        {eventItem.eventNumber || "Event booking"}
-                      </p>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px]">
+                <thead className="bg-slate-50">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-5 py-4">Event</th>
+                    <th className="px-5 py-4">Department</th>
+                    <th className="px-5 py-4">Venue</th>
+                    <th className="px-5 py-4">Date</th>
+                    <th className="px-5 py-4">Time</th>
+                    <th className="px-5 py-4">Status</th>
+                  </tr>
+                </thead>
 
-                      <h4 className="mt-1 truncate font-bold text-slate-900">
-                        {eventItem.eventTitle || "Untitled event"}
-                      </h4>
-                    </div>
+                <tbody className="divide-y divide-slate-100">
+                  {upcomingEvents.map((eventItem) => (
+                    <tr
+                      key={eventItem.id}
+                      onClick={() =>
+                        navigate("/events", {
+                          state: {
+                            selectedEventId: eventItem.id,
+                          },
+                        })
+                      }
+                      className="cursor-pointer transition hover:bg-blue-50/40"
+                    >
+                      <td className="px-5 py-4">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                          {eventItem.eventNumber || "Event booking"}
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-900">
+                          {eventItem.eventTitle || "Untitled event"}
+                        </p>
+                      </td>
 
-                    <span className="inline-flex shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
-                      {eventItem.status || "Pending QA Approval"}
-                    </span>
-                  </div>
+                      <td className="px-5 py-4 text-sm text-slate-700">
+                        {eventItem.department || "No department"}
+                      </td>
 
-                  <div className="mt-4 space-y-2 text-sm text-slate-600">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays
-                        size={16}
-                        className="shrink-0 text-slate-400"
-                      />
+                      <td className="px-5 py-4">
+                        <span className="inline-flex items-center gap-2 text-sm text-slate-700">
+                          <MapPin size={15} className="text-slate-400" />
+                          {getEventVenue(eventItem)}
+                        </span>
+                      </td>
 
-                      <span>
+                      <td className="px-5 py-4 text-sm font-medium text-slate-700">
                         {formatEventDate(eventItem.eventDate)}
-                        {" · "}
+                      </td>
+
+                      <td className="px-5 py-4 text-sm text-slate-600">
                         {formatEventTime(eventItem.startTime)}
-                      </span>
-                    </div>
+                      </td>
 
-                    <div className="flex items-center gap-2">
-                      <MapPin
-                        size={16}
-                        className="shrink-0 text-slate-400"
-                      />
-
-                      <span className="truncate">
-                        {getEventVenue(eventItem)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <p className="mt-4 text-sm font-medium text-slate-700">
-                    {eventItem.department || "No department"}
-                  </p>
-                </button>
-              ))}
+                      <td className="px-5 py-4">
+                        <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-600/20">
+                          Confirmed
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </article>

@@ -183,6 +183,7 @@ export default function ITWorkBoard() {
   const [activitiesLoading, setActivitiesLoading] = useState(true);
 
   const [form, setForm] = useState(BLANK_FORM);
+  const [selectedPost, setSelectedPost] = useState(null);
 
   const [showEditor, setShowEditor] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -197,15 +198,54 @@ export default function ITWorkBoard() {
     userProfile?.role === "admin" ||
     userProfile?.role === "ADMIN";
   const canViewRecentActivities = isITStaff || isAdmin;
+  const canEditWorkBoard = isITStaff || isAdmin;
 
-  const saveBoardStatusWithWorkLog = async ({ boardData, automatic = false }) => {
-    if (!currentUser?.uid) throw new Error("Your account information could not be found.");
+  const saveBoardStatusWithWorkLog = async ({
+    boardData,
+    automatic = false,
+    targetPost = null,
+  }) => {
+    if (!currentUser?.uid) {
+      throw new Error("Your account information could not be found.");
+    }
 
-    const staffName = getUserName(userProfile, currentUser);
+    const targetUid =
+      targetPost?.uid ||
+      targetPost?.id ||
+      currentUser.uid;
+
+    const editingAnotherStaff =
+      targetUid !== currentUser.uid;
+
+    if (editingAnotherStaff && !isAdmin) {
+      throw new Error(
+        "Only an administrator can edit another staff member's work board."
+      );
+    }
+
+    const staffName =
+      targetPost?.fullName ||
+      targetPost?.name ||
+      (editingAnotherStaff
+        ? targetPost?.email || "IT Staff"
+        : getUserName(userProfile, currentUser));
+
+    const staffEmail =
+      targetPost?.email ||
+      (editingAnotherStaff ? "" : currentUser.email || "");
+
+    const staffDepartment =
+      targetPost?.department ||
+      (editingAnotherStaff
+        ? "MIS"
+        : userProfile?.department || "MIS");
+
     const now = Timestamp.now();
-    const boardReference = doc(db, "itWorkBoard", currentUser.uid);
+    const boardReference = doc(db, "itWorkBoard", targetUid);
     const reportable = shouldRecordWorkLog(boardData.status);
-    const newLogReference = reportable ? doc(collection(db, "itWorkLogs")) : null;
+    const newLogReference = reportable
+      ? doc(collection(db, "itWorkLogs"))
+      : null;
 
     await runTransaction(db, async (transaction) => {
       const boardSnapshot = await transaction.get(boardReference);
@@ -230,10 +270,10 @@ export default function ITWorkBoard() {
 
       if (newLogReference) {
         transaction.set(newLogReference, {
-          staffId: currentUser.uid,
+          staffId: targetUid,
           staffName,
-          email: currentUser.email || "",
-          department: userProfile?.department || "MIS",
+          email: staffEmail,
+          department: staffDepartment,
           status: boardData.status,
           activity: boardData.activity || "",
           location: boardData.location || "",
@@ -250,7 +290,7 @@ export default function ITWorkBoard() {
       }
 
       transaction.set(boardReference, {
-        uid: currentUser.uid,
+        uid: targetUid,
         fullName: staffName,
         email: currentUser.email || "",
         department: userProfile?.department || "MIS",
@@ -260,7 +300,7 @@ export default function ITWorkBoard() {
         createdAt: previousBoard?.createdAt || boardData.createdAt || now,
         updatedAt: now,
         updatedByUid: currentUser.uid,
-        updatedByName: staffName,
+        updatedByName: getUserName(userProfile, currentUser),
         updatedAutomatically: automatic,
       }, { merge: true });
     });
@@ -402,6 +442,10 @@ export default function ITWorkBoard() {
       ) || null
     );
   }, [workPosts, currentUser?.uid]);
+
+  const editorPost =
+    selectedPost ||
+    (isITStaff ? myCurrentPost : null);
 
   useEffect(() => {
   if (!isITStaff || !currentUser?.uid || ticketsLoading) {
@@ -569,7 +613,7 @@ export default function ITWorkBoard() {
   ]);
 
   useEffect(() => {
-    if (!myCurrentPost || showEditor) {
+    if (!myCurrentPost || showEditor || isAdmin) {
       return;
     }
 
@@ -581,17 +625,29 @@ export default function ITWorkBoard() {
       estimatedFinish:
         myCurrentPost.estimatedFinish || "",
     });
-  }, [myCurrentPost, showEditor]);
+  }, [myCurrentPost, showEditor, isAdmin]);
 
-  const openEditor = () => {
+  const openEditor = (post = null) => {
+    const postToEdit =
+      post ||
+      (isITStaff ? myCurrentPost : null);
+
+    if (!postToEdit && isAdmin) {
+      setError(
+        "Select an IT staff member's card before editing the work board."
+      );
+      return;
+    }
+
+    setSelectedPost(postToEdit);
+
     setForm({
-      status: myCurrentPost?.status || "Available",
-      activity: myCurrentPost?.activity || "",
-      location: myCurrentPost?.location || "",
-      ticketNumber:
-        myCurrentPost?.ticketNumber || "",
+      status: postToEdit?.status || "Available",
+      activity: postToEdit?.activity || "",
+      location: postToEdit?.location || "",
+      ticketNumber: postToEdit?.ticketNumber || "",
       estimatedFinish:
-        myCurrentPost?.estimatedFinish || "",
+        postToEdit?.estimatedFinish || "",
     });
 
     setMessage("");
@@ -605,6 +661,7 @@ export default function ITWorkBoard() {
     }
 
     setShowEditor(false);
+    setSelectedPost(null);
     setMessage("");
     setError("");
   };
@@ -649,10 +706,15 @@ export default function ITWorkBoard() {
   const handleSave = async (event) => {
     event.preventDefault();
 
-    if (!isITStaff) {
+    if (!canEditWorkBoard) {
       setError(
-        "Only IT staff members can update the IT Work Board."
+        "Only administrators and IT staff members can update the IT Work Board."
       );
+      return;
+    }
+
+    if (isAdmin && !editorPost) {
+      setError("Please select an IT staff member to edit.");
       return;
     }
 
@@ -687,6 +749,7 @@ export default function ITWorkBoard() {
 
       await saveBoardStatusWithWorkLog({
         automatic: false,
+        targetPost: editorPost,
         boardData: {
           status: form.status,
           activity: form.status === "Available"
@@ -705,10 +768,13 @@ export default function ITWorkBoard() {
       });
 
       setMessage(
-        "Your current activity has been posted successfully."
+        isAdmin && editorPost?.uid !== currentUser?.uid
+          ? `${editorPost?.fullName || "The IT staff member"}'s work board was updated successfully.`
+          : "Your current activity has been posted successfully."
       );
 
       setShowEditor(false);
+      setSelectedPost(null);
     } catch (saveError) {
       console.error(
         "Unable to save IT work status:",
@@ -876,11 +942,12 @@ export default function ITWorkBoard() {
               key={post.id}
               post={post}
               canEdit={
-                isITStaff &&
-                (post.uid === currentUser?.uid ||
-                  post.id === currentUser?.uid)
+                isAdmin ||
+                (isITStaff &&
+                  (post.uid === currentUser?.uid ||
+                    post.id === currentUser?.uid))
               }
-              onEdit={openEditor}
+              onEdit={() => openEditor(post)}
             />
           ))}
         </section>
@@ -968,7 +1035,7 @@ export default function ITWorkBoard() {
         </section>
       )}
 
-      {showEditor && isITStaff && (
+      {showEditor && canEditWorkBoard && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
           onClick={closeEditor}
@@ -982,14 +1049,17 @@ export default function ITWorkBoard() {
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  {myCurrentPost
-                    ? "Update My Activity"
-                    : "Post My Activity"}
+                  {isAdmin && editorPost?.uid !== currentUser?.uid
+                    ? `Edit ${editorPost?.fullName || "IT Staff"}`
+                    : editorPost
+                      ? "Update My Activity"
+                      : "Post My Activity"}
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Let users know what you are currently
-                  working on.
+                  {isAdmin && editorPost?.uid !== currentUser?.uid
+                    ? "Update this IT staff member's current work status."
+                    : "Let users know what you are currently working on."}
                 </p>
               </div>
 
@@ -1051,45 +1121,60 @@ export default function ITWorkBoard() {
                     Related Ticket
                   </label>
 
-                  <select
-                    id="ticketNumber"
-                    name="ticketNumber"
-                    value={form.ticketNumber}
-                    onChange={handleTicketSelection}
-                    disabled={
-                      saving || ticketsLoading
-                    }
-                    className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
-                  >
-                    <option value="">
-                      {ticketsLoading
-                        ? "Loading assigned tickets..."
-                        : "Select an assigned ticket"}
-                    </option>
-
-                    {tickets.map((ticketItem) => (
-                      <option
-                        key={ticketItem.id}
-                        value={
-                          ticketItem.ticketNumber || ""
+                  {isAdmin &&
+                  editorPost?.uid !== currentUser?.uid ? (
+                    <input
+                      id="ticketNumber"
+                      name="ticketNumber"
+                      type="text"
+                      value={form.ticketNumber}
+                      onChange={handleInputChange}
+                      disabled={saving}
+                      placeholder="Enter the related ticket number"
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                    />
+                  ) : (
+                    <>
+                      <select
+                        id="ticketNumber"
+                        name="ticketNumber"
+                        value={form.ticketNumber}
+                        onChange={handleTicketSelection}
+                        disabled={
+                          saving || ticketsLoading
                         }
+                        className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
                       >
-                        {ticketItem.ticketNumber ||
-                          "No ticket number"}{" "}
-                        —{" "}
-                        {ticketItem.subject ||
-                          "No subject"}
-                      </option>
-                    ))}
-                  </select>
+                        <option value="">
+                          {ticketsLoading
+                            ? "Loading assigned tickets..."
+                            : "Select an assigned ticket"}
+                        </option>
 
-                  {!ticketsLoading &&
-                    tickets.length === 0 && (
-                      <p className="mt-2 text-sm text-amber-600">
-                        You currently have no active
-                        assigned tickets.
-                      </p>
-                    )}
+                        {tickets.map((ticketItem) => (
+                          <option
+                            key={ticketItem.id}
+                            value={
+                              ticketItem.ticketNumber || ""
+                            }
+                          >
+                            {ticketItem.ticketNumber ||
+                              "No ticket number"}{" "}
+                            —{" "}
+                            {ticketItem.subject ||
+                              "No subject"}
+                          </option>
+                        ))}
+                      </select>
+
+                      {!ticketsLoading &&
+                        tickets.length === 0 && (
+                          <p className="mt-2 text-sm text-amber-600">
+                            You currently have no active assigned tickets.
+                          </p>
+                        )}
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1181,9 +1266,12 @@ export default function ITWorkBoard() {
 
                   {saving
                     ? "Posting..."
-                    : myCurrentPost
-                      ? "Update Activity"
-                      : "Post Activity"}
+                    : isAdmin &&
+                        editorPost?.uid !== currentUser?.uid
+                      ? "Save Staff Activity"
+                      : editorPost
+                        ? "Update Activity"
+                        : "Post Activity"}
                 </button>
               </div>
             </form>

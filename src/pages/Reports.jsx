@@ -43,7 +43,7 @@ const STATUS_ORDER = [
   "Assigned",
   "In Progress",
   "Resolved",
-  "Closed",
+  "Waiting for Confirmation",
 ];
 
 const STATUS_COLORS = {
@@ -51,7 +51,7 @@ const STATUS_COLORS = {
   Assigned: "#06b6d4",
   "In Progress": "#8b5cf6",
   Resolved: "#10b981",
-  Closed: "#64748b",
+  "Waiting for Confirmation": "#64748b",
 };
 
 const EVENT_STATUS_ORDER = [
@@ -70,6 +70,19 @@ const EVENT_STATUS_COLORS = {
   Cancelled: "#64748b",
 };
 
+const IT_STAFF_COLORS = [
+  "#2563eb",
+  "#8b5cf6",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#06b6d4",
+  "#ec4899",
+  "#84cc16",
+  "#f97316",
+  "#64748b",
+];
+
 
 function normalizeText(value) {
   return String(value || "").trim();
@@ -83,7 +96,8 @@ function normalizeStatus(value) {
   if (status === "assigned") return "Assigned";
   if (status === "in progress") return "In Progress";
   if (status === "resolved") return "Resolved";
-  if (status === "closed") return "Closed";
+  if (status === "waiting for confirmation") return "Waiting for Confirmation";
+  if (status === "closed") return "Waiting for Confirmation";
 
   return normalizeText(value) || "Pending";
 }
@@ -554,6 +568,31 @@ export default function Reports() {
   ]);
 
 
+  const workActivityAnalytics = useMemo(() => {
+    const staffCounts = {};
+
+    filteredWorkLogs.forEach((workLog) => {
+      const staff =
+        workLog.staffName ||
+        workLog.email ||
+        "Unknown IT Staff";
+
+      staffCounts[staff] = (staffCounts[staff] || 0) + 1;
+    });
+
+    const staffData = Object.entries(staffCounts)
+      .map(([name, value]) => ({
+        name,
+        value,
+      }))
+      .sort((a, b) => b.value - a.value);
+
+    return {
+      total: filteredWorkLogs.length,
+      staffData,
+    };
+  }, [filteredWorkLogs]);
+
   const eventAnalytics = useMemo(() => {
     const statusCounts = Object.fromEntries(
       EVENT_STATUS_ORDER.map((status) => [status, 0])
@@ -627,7 +666,7 @@ export default function Reports() {
       Assigned: 0,
       "In Progress": 0,
       Resolved: 0,
-      Closed: 0,
+      "Waiting for Confirmation": 0,
     };
 
     const departmentCounts = {};
@@ -663,7 +702,7 @@ export default function Reports() {
           pending: 0,
           inProgress: 0,
           resolved: 0,
-          closed: 0,
+          waitingForConfirmation: 0,
         };
       }
 
@@ -688,8 +727,8 @@ export default function Reports() {
         ].resolved += 1;
       }
 
-      if (status === "Closed") {
-        departmentPerformance[department].closed += 1;
+      if (status === "Waiting for Confirmation") {
+        departmentPerformance[department].waitingForConfirmation += 1;
       }
 
       if (staff !== "Unassigned") {
@@ -699,7 +738,7 @@ export default function Reports() {
             pending: 0,
             inProgress: 0,
             resolved: 0,
-            closed: 0,
+            waitingForConfirmation: 0,
             priorities: {
               Low: 0,
               Medium: 0,
@@ -729,8 +768,8 @@ export default function Reports() {
           staffCounts[staff].resolved += 1;
         }
 
-        if (status === "Closed") {
-          staffCounts[staff].closed += 1;
+        if (status === "Waiting for Confirmation") {
+          staffCounts[staff].waitingForConfirmation += 1;
         }
       }
 
@@ -752,16 +791,18 @@ export default function Reports() {
             date: createdDate,
             tickets: 0,
             resolved: 0,
+            waitingForConfirmation: 0,
           };
         }
 
         dailyTrend[trendKey].tickets += 1;
 
-        if (
-          status === "Resolved" ||
-          status === "Closed"
-        ) {
+        if (status === "Resolved") {
           dailyTrend[trendKey].resolved += 1;
+        }
+
+        if (status === "Waiting for Confirmation") {
+          dailyTrend[trendKey].waitingForConfirmation += 1;
         }
       }
 
@@ -769,7 +810,7 @@ export default function Reports() {
         createdDate &&
         resolvedDate &&
         (status === "Resolved" ||
-          status === "Closed")
+          status === "Waiting for Confirmation")
       ) {
         const durationHours =
           (resolvedDate.getTime() -
@@ -785,7 +826,8 @@ export default function Reports() {
 
     const total = filteredTickets.length;
     const completed =
-      statusCounts.Resolved + statusCounts.Closed;
+      statusCounts.Resolved +
+      statusCounts["Waiting for Confirmation"];
 
     const averageResolutionHours =
       ticketsWithResolutionTime > 0
@@ -823,16 +865,17 @@ export default function Reports() {
         (a, b) =>
           a.date.getTime() - b.date.getTime()
       )
-      .map(({ label, tickets: count, resolved }) => ({
+      .map(({ label, tickets: count, resolved, waitingForConfirmation }) => ({
         name: label,
         tickets: count,
         resolved,
+        waitingForConfirmation,
       }));
 
     const staffData = Object.entries(staffCounts)
       .map(([name, values]) => {
         const completedTickets =
-          values.resolved + values.closed;
+          values.resolved + values.waitingForConfirmation;
 
         const priorityEntries = Object.entries(values.priorities);
         const highestPriorityCount = Math.max(
@@ -872,7 +915,7 @@ export default function Reports() {
     )
       .map(([name, values]) => {
         const completedTickets =
-          values.resolved + values.closed;
+          values.resolved + values.waitingForConfirmation;
 
         return {
           name,
@@ -896,7 +939,7 @@ export default function Reports() {
       assigned: statusCounts.Assigned,
       inProgress: statusCounts["In Progress"],
       resolved: statusCounts.Resolved,
-      closed: statusCounts.Closed,
+      waitingForConfirmation: statusCounts["Waiting for Confirmation"],
       completed,
       resolutionRate:
         total > 0
@@ -1545,6 +1588,14 @@ export default function Reports() {
                       strokeWidth={3}
                       dot={{ r: 4 }}
                     />
+                    <Line
+                      type="monotone"
+                      dataKey="waitingForConfirmation"
+                      name="Waiting for Confirmation"
+                      stroke="#64748b"
+                      strokeWidth={3}
+                      dot={{ r: 4 }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -1808,13 +1859,125 @@ export default function Reports() {
               iconClass="bg-violet-50 text-violet-600"
             >
               <div className="border-b border-slate-100 p-5">
-                <div className="w-full rounded-xl bg-violet-50 p-4 sm:max-w-xs">
-                  <p className="text-sm font-medium text-violet-700">
-                    Recorded Activities
-                  </p>
-                  <p className="mt-2 text-2xl font-bold text-violet-900">
-                    {filteredWorkLogs.length}
-                  </p>
+                <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
+                  <div className="rounded-xl bg-violet-50 p-5">
+                    <p className="text-sm font-medium text-violet-700">
+                      Recorded Activities
+                    </p>
+
+                    <p className="mt-2 text-3xl font-bold text-violet-900">
+                      {workActivityAnalytics.total}
+                    </p>
+
+                    <p className="mt-2 text-xs text-violet-600">
+                      Non-ticket IT work activities
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5">
+                    <div className="mb-4">
+                      <h3 className="font-semibold text-slate-900">
+                        IT Work Activities by Staff
+                      </h3>
+
+                      <p className="mt-1 text-sm text-slate-500">
+                        Distribution of recorded activities classified by IT staff
+                      </p>
+                    </div>
+
+                    {workActivityAnalytics.staffData.length === 0 ? (
+                      <EmptyChart />
+                    ) : (
+                      <div className="grid items-center gap-5 md:grid-cols-[1fr_220px]">
+                        <ResponsiveContainer width="100%" height={260}>
+                          <PieChart>
+                            <Pie
+                              data={workActivityAnalytics.staffData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={55}
+                              outerRadius={95}
+                              paddingAngle={3}
+                            >
+                              {workActivityAnalytics.staffData.map(
+                                (entry, index) => (
+                                  <Cell
+                                    key={entry.name}
+                                    fill={
+                                      IT_STAFF_COLORS[
+                                        index % IT_STAFF_COLORS.length
+                                      ]
+                                    }
+                                  />
+                                )
+                              )}
+                            </Pie>
+
+                            <Tooltip
+                              formatter={(value, name) => [
+                                `${value} ${
+                                  Number(value) === 1
+                                    ? "activity"
+                                    : "activities"
+                                }`,
+                                name,
+                              ]}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+
+                        <div className="space-y-3">
+                          {workActivityAnalytics.staffData.map(
+                            (entry, index) => {
+                              const percentage =
+                                workActivityAnalytics.total > 0
+                                  ? Math.round(
+                                      (entry.value /
+                                        workActivityAnalytics.total) *
+                                        100
+                                    )
+                                  : 0;
+
+                              return (
+                                <div
+                                  key={entry.name}
+                                  className="flex items-center justify-between gap-4"
+                                >
+                                  <div className="flex min-w-0 items-center gap-2">
+                                    <span
+                                      className="h-3 w-3 shrink-0 rounded-full"
+                                      style={{
+                                        backgroundColor:
+                                          IT_STAFF_COLORS[
+                                            index % IT_STAFF_COLORS.length
+                                          ],
+                                      }}
+                                    />
+
+                                    <span className="truncate text-sm text-slate-600">
+                                      {entry.name}
+                                    </span>
+                                  </div>
+
+                                  <div className="shrink-0 text-right">
+                                    <span className="text-sm font-bold text-slate-900">
+                                      {entry.value}
+                                    </span>
+
+                                    <span className="ml-1 text-xs text-slate-400">
+                                      ({percentage}%)
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            }
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
